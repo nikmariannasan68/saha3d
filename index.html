@@ -1,0 +1,2383 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>САХА 3D — Живая карта Якутии</title>
+<meta name="description" content="Интерактивный 3D-атлас Республики Саха (Якутия): улусы и наслеги, реки и озёра, рельеф, спутниковые снимки, климат, транспорт, туризм. Открытые данные OpenStreetMap, NASA и Wikidata.">
+<meta property="og:title" content="САХА 3D — Живая карта Якутии">
+<meta property="og:description" content="Интерактивный 3D-атлас Республики Саха (Якутия) на открытых данных.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#060b16">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23060b16' stroke='%23e8c26a' stroke-width='4'/%3E%3Cpath d='M12 42 26 22l8 11 6-7 12 16z' fill='%239fd8ff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/cesium@1.123/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.123/Build/Cesium/';</script>
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.123/Build/Cesium/Cesium.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
+<style>
+:root{
+  --bg:#060b16; --glass:rgba(12,20,36,.66); --glass2:rgba(18,28,48,.78);
+  --line:rgba(160,210,255,.14); --line2:rgba(160,210,255,.26);
+  --ice:#9fd8ff; --teal:#2dd4bf; --gold:#e8c26a; --text:#e8f1ff; --muted:#8ea3c2; --err:#f87171;
+  --r:16px; --font:'Manrope',system-ui,sans-serif; --disp:'Unbounded','Manrope',sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--font);overflow:hidden}
+#cesium{position:fixed;inset:0}
+.cesium-viewer-bottom{left:auto!important;right:8px;bottom:34px!important}
+.cesium-widget-credits{font-size:10px;opacity:.65}
+button{font-family:inherit;color:inherit}
+.glass{background:var(--glass);backdrop-filter:blur(16px) saturate(140%);-webkit-backdrop-filter:blur(16px) saturate(140%);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 10px 40px rgba(0,0,0,.35)}
+.btn{background:rgba(159,216,255,.08);border:1px solid var(--line2);border-radius:10px;padding:8px 12px;font-size:13px;cursor:pointer;transition:.2s}
+.btn:hover{background:rgba(159,216,255,.18);border-color:var(--ice)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.gold{background:linear-gradient(135deg,#f3d27e,#c99a3c);color:#1a1405;border:0;font-weight:700}
+.btn.on{background:rgba(45,212,191,.22);border-color:var(--teal)}
+.muted{color:var(--muted)}
+.hidden{display:none!important}
+.fade{transition:opacity .8s, transform .8s}
+input,select{font-family:inherit;color:var(--text);background:rgba(6,12,24,.7);border:1px solid var(--line2);border-radius:10px;padding:8px 10px;font-size:13px;outline:none}
+input:focus,select:focus{border-color:var(--ice)}
+select option{background:#0c1424}
+/* intro */
+#intro{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:20;text-align:center}
+#intro .title{font-family:var(--disp);font-size:clamp(46px,9vw,118px);font-weight:700;letter-spacing:.06em;background:linear-gradient(180deg,#fff 10%,#9fd8ff 60%,#2dd4bf);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 0 60px rgba(120,200,255,.25);line-height:1}
+#intro .sub{font-size:clamp(16px,2.2vw,24px);margin:14px 0 34px;color:#cfe5ff;letter-spacing:.12em;text-transform:uppercase}
+#intro .btn.gold{pointer-events:auto;font-size:17px;padding:15px 34px;border-radius:40px;box-shadow:0 0 40px rgba(232,194,106,.35)}
+#introStatus{margin-top:22px;font-size:13px;color:var(--muted);min-height:18px;pointer-events:auto}
+#skip{position:fixed;right:24px;bottom:56px;z-index:25}
+#regionTitle{position:fixed;left:50%;top:16%;transform:translateX(-50%);z-index:21;font-family:var(--disp);font-size:clamp(22px,4vw,48px);text-align:center;opacity:0;pointer-events:none;text-shadow:0 0 30px rgba(232,194,106,.6)}
+#regionTitle small{display:block;font-family:var(--font);font-size:14px;letter-spacing:.3em;color:var(--gold);margin-top:8px}
+/* top bar */
+#top{position:fixed;left:12px;right:12px;top:12px;height:56px;display:flex;align-items:center;gap:10px;padding:0 12px;z-index:10}
+#logo{font-family:var(--disp);font-weight:700;font-size:18px;letter-spacing:.08em;white-space:nowrap;cursor:pointer}
+#logo span{color:var(--gold)}
+#searchWrap{position:relative;flex:1;max-width:520px}
+#search{width:100%;padding:10px 14px 10px 36px;border-radius:12px}
+#searchWrap svg{position:absolute;left:11px;top:11px;opacity:.6}
+#sugg{position:absolute;left:0;right:0;top:46px;max-height:360px;overflow:auto;padding:6px;z-index:30}
+.sg{padding:8px 10px;border-radius:10px;cursor:pointer;display:flex;justify-content:space-between;gap:10px;font-size:14px}
+.sg:hover,.sg.act{background:rgba(159,216,255,.12)}
+.sg .k{font-size:11px;color:var(--muted);white-space:nowrap}
+#top .sp{flex:1}
+/* crumbs */
+#crumbs{position:fixed;left:84px;top:78px;z-index:9;padding:7px 14px;font-size:13px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+#crumbs a{color:var(--ice);cursor:pointer;text-decoration:none}
+#crumbs a:hover{text-decoration:underline}
+/* left nav */
+#nav{position:fixed;left:12px;top:78px;width:60px;padding:8px 0;display:flex;flex-direction:column;align-items:center;gap:4px;z-index:10}
+.nb{width:46px;height:46px;border-radius:12px;border:1px solid transparent;background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;position:relative}
+.nb:hover{background:rgba(159,216,255,.1)}
+.nb.on{background:rgba(45,212,191,.18);border-color:rgba(45,212,191,.5)}
+.nb svg{width:22px;height:22px;stroke:var(--text);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.nb[data-tip]:hover::after{content:attr(data-tip);position:absolute;left:54px;white-space:nowrap;background:var(--glass2);padding:5px 9px;border-radius:8px;font-size:12px;border:1px solid var(--line)}
+#left{position:fixed;left:84px;top:118px;bottom:56px;width:330px;z-index:9;display:flex;flex-direction:column;overflow:hidden}
+#left h3,#right h3{margin:0;font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.lh{padding:14px 16px 8px;display:flex;justify-content:space-between;align-items:center}
+.lb{padding:4px 16px 16px;overflow:auto;flex:1}
+.x{background:none;border:0;cursor:pointer;font-size:20px;color:var(--muted);line-height:1}
+.row{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:14px}
+.row label{flex:1;cursor:pointer}
+.sec{margin:14px 0 6px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}
+.item{padding:8px 10px;border-radius:10px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;font-size:14px;border:1px solid transparent}
+.item:hover{background:rgba(159,216,255,.08);border-color:var(--line)}
+.item small{color:var(--muted);white-space:nowrap}
+.note{font-size:12px;color:var(--muted);line-height:1.5;padding:8px 10px;border-left:2px solid var(--gold);background:rgba(232,194,106,.06);border-radius:0 8px 8px 0;margin:8px 0}
+.chip{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--line2);color:var(--muted);margin:2px 4px 2px 0}
+.switch{appearance:none;width:34px;height:19px;border-radius:20px;background:#22314d;position:relative;cursor:pointer;border:0;padding:0;flex:none}
+.switch:checked{background:var(--teal)}
+.switch::after{content:'';position:absolute;left:2px;top:2px;width:15px;height:15px;border-radius:50%;background:#fff;transition:.2s}
+.switch:checked::after{left:17px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+/* right panel */
+#right{position:fixed;right:12px;top:78px;bottom:56px;width:390px;z-index:9;display:flex;flex-direction:column;overflow:hidden;transform:translateX(0);transition:transform .45s cubic-bezier(.2,.8,.2,1),opacity .45s}
+#right.off{transform:translateX(420px);opacity:0;pointer-events:none}
+#rb{overflow:auto;flex:1;padding:0 18px 18px}
+.kick{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);margin-top:4px}
+.pt{font-family:var(--disp);font-size:24px;font-weight:600;margin:6px 0 2px;line-height:1.2}
+.alt{color:var(--ice);font-size:14px}
+.facts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0}
+.fact{background:rgba(159,216,255,.05);border:1px solid var(--line);border-radius:12px;padding:9px 11px}
+.fact b{display:block;font-size:11px;color:var(--muted);font-weight:500;margin-bottom:3px}
+.fact span{font-size:14px;font-weight:600}
+.fact i{display:block;font-style:normal;font-size:10px;color:var(--muted);margin-top:2px}
+.fact.w{grid-column:1/-1}
+.tabs{display:flex;gap:4px;margin:10px 0;flex-wrap:wrap}
+.tab{padding:6px 11px;border-radius:9px;font-size:13px;cursor:pointer;border:1px solid var(--line);background:none}
+.tab.on{background:rgba(45,212,191,.18);border-color:var(--teal)}
+.photo{width:100%;border-radius:12px;margin:8px 0;max-height:220px;object-fit:cover;border:1px solid var(--line)}
+.emb{display:flex;gap:12px;align-items:flex-end;margin:8px 0}
+.emb img{height:80px;max-width:120px;object-fit:contain;background:rgba(255,255,255,.04);border-radius:8px;padding:4px}
+.emb figure{margin:0;text-align:center;font-size:11px;color:var(--muted)}
+.txt{font-size:14px;line-height:1.6;color:#d4e3fa}
+.src{font-size:11px;color:var(--muted);line-height:1.6;margin-top:14px;border-top:1px solid var(--line);padding-top:10px}
+.src a{color:var(--ice)}
+.tbd{color:var(--muted);font-style:italic}
+/* bottom bar */
+#bottom{position:fixed;left:12px;right:12px;bottom:10px;height:38px;display:flex;align-items:center;gap:18px;padding:0 14px;font-size:12px;z-index:10;font-variant-numeric:tabular-nums}
+#bottom .v{color:var(--ice)}
+#compass{width:28px;height:28px;cursor:pointer;flex:none}
+#scalebar{display:flex;align-items:center;gap:6px}
+#scalebar i{display:block;height:6px;border:1.5px solid var(--ice);border-top:0;width:100px}
+/* tooltip */
+#tip{position:fixed;z-index:40;pointer-events:none;padding:8px 12px;font-size:13px;max-width:260px;transform:translate(14px,14px)}
+#tip b{display:block;font-size:14px}
+/* tool hint / flight */
+#hint{position:fixed;left:50%;bottom:60px;transform:translateX(-50%);z-index:12;padding:10px 14px;font-size:13px;display:flex;gap:10px;align-items:center;max-width:92vw;flex-wrap:wrap}
+#flight{position:fixed;left:50%;bottom:60px;transform:translateX(-50%);z-index:12;padding:12px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;max-width:94vw}
+#flight .ft{font-weight:700;margin-right:6px}
+#flight label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+#flight input[type=range]{width:100px;padding:0}
+#profile{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);z-index:12;width:min(760px,92vw);padding:12px 14px}
+#profile svg{width:100%;height:170px}
+#toast{position:fixed;left:50%;top:80px;transform:translateX(-50%);z-index:50;padding:10px 16px;font-size:14px;display:flex;gap:10px;align-items:center;max-width:90vw}
+#toast.err{border-color:rgba(248,113,113,.6)}
+#modal{position:fixed;inset:0;z-index:60;background:rgba(2,6,14,.55);display:flex;align-items:center;justify-content:center}
+#modal .glass{width:min(520px,92vw);padding:20px;max-height:86vh;overflow:auto}
+#split{position:fixed;top:0;bottom:0;left:50%;width:0;z-index:7;pointer-events:none}
+#split .ln{position:absolute;top:0;bottom:0;left:-1px;width:2px;background:var(--gold);box-shadow:0 0 12px rgba(232,194,106,.8)}
+#split .hd{position:absolute;top:50%;left:-19px;width:38px;height:38px;margin-top:-19px;border-radius:50%;background:var(--glass2);border:2px solid var(--gold);cursor:ew-resize;pointer-events:auto;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--gold)}
+#split .lb{position:absolute;top:130px;white-space:nowrap;font-size:12px;padding:4px 10px;pointer-events:none}
+#split .lb.l{right:14px} #split .lb.r{left:14px}
+#stBadge{position:fixed;left:50%;top:78px;transform:translateX(-50%);z-index:8;padding:6px 14px;font-size:12px;white-space:nowrap}
+.seg{display:flex;gap:4px;flex-wrap:wrap;margin:6px 0}
+.seg .btn{padding:6px 9px;font-size:12px}
+#legend{position:fixed;right:12px;bottom:56px;z-index:8;padding:10px 12px;font-size:11px;width:200px}
+#legend .bar{height:8px;border-radius:4px;background:linear-gradient(90deg,#0e6b52,#3d9a58,#b9c76b,#d8b05a,#a86b3c,#8a7d78,#fff);margin:6px 0 3px}
+.ui{opacity:0;pointer-events:none;transition:opacity .9s}
+body.map .ui{opacity:1;pointer-events:auto}
+body.map #right.off{pointer-events:none}
+@media (max-width:820px){
+  #logo{font-size:14px} #top .hideM{display:none}
+  #left{left:8px;right:8px;width:auto;top:auto;bottom:54px;height:55vh}
+  #right{left:8px;right:8px;width:auto;top:auto;bottom:54px;height:62vh}
+  #right.off{transform:translateY(70vh)}
+  #nav{top:auto;bottom:54px;left:8px;right:8px;width:auto;flex-direction:row;justify-content:space-around;height:56px;padding:0 6px}
+  body.panel #nav{display:none}
+  #crumbs{left:8px;top:74px}
+  #bottom{gap:10px;font-size:11px} #bottom .hideM{display:none}
+  .nb[data-tip]:hover::after{display:none}
+}
+</style>
+</head>
+<body>
+<div id="cesium"></div>
+<canvas id="snowfx" style="position:fixed;inset:0;pointer-events:none;z-index:5;display:none"></canvas>
+
+<!-- ===== INTRO ===== -->
+<div id="intro" class="fade">
+  <div class="title">САХА 3D</div>
+  <div class="sub">Открой для себя Якутию</div>
+  <button class="btn gold" id="start">Начать путешествие</button>
+  <div id="introStatus">Загружаем реальные границы из OpenStreetMap…</div>
+</div>
+<button class="btn hidden" id="skip">Пропустить анимацию ⏭</button>
+<div id="regionTitle">Республика Саха (Якутия)<small>САХА ӨРӨСПҮҮБҮЛҮКЭТЭ</small></div>
+
+<!-- ===== TOP ===== -->
+<div id="top" class="glass ui">
+  <div id="logo" title="Вся Якутия">САХА <span>3D</span></div>
+  <div id="searchWrap">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="search" placeholder="Улус, наслег, село, река, озеро или «62.03, 129.73»" autocomplete="off">
+    <div id="sugg" class="glass hidden"></div>
+  </div>
+  <div class="sp"></div>
+  <select id="baseSel" title="Картографическая подложка"></select>
+  <button class="btn" id="dim" title="Переключение 2D/3D">2D</button>
+  <select id="langSel" class="hideM" title="Язык подписей объектов">
+    <option value="ru">RU</option><option value="sah">САХА</option><option value="en">EN</option>
+  </select>
+  <button class="btn" id="settingsBtn" title="Настройки">⚙</button>
+</div>
+<div id="crumbs" class="glass ui"></div>
+
+<!-- ===== LEFT NAV ===== -->
+<div id="nav" class="glass ui">
+  <button class="nb" data-p="layers" data-tip="Слои и карты"><svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></svg></button>
+  <button class="nb" data-p="districts" data-tip="Улусы и округа"><svg viewBox="0 0 24 24"><path d="M4 5l5-2 6 2 5-2v16l-5 2-6-2-5 2z"/><path d="M9 3v16M15 5v16"/></svg></button>
+  <button class="nb" data-p="flight" data-tip="Путешествие по Якутии"><svg viewBox="0 0 24 24"><path d="M2 16l20-8-8 12-2-6-10 2z"/></svg></button>
+  <button class="nb" data-p="tools" data-tip="Измерения"><svg viewBox="0 0 24 24"><path d="M3 17 17 3l4 4L7 21z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/></svg></button>
+  <button class="nb" data-p="time" data-tip="Время и космос: снимки, климат, снег"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/><path d="M2 12h2M20 12h2"/></svg></button>
+  <button class="nb" data-p="saved" data-tip="Избранное и история"><svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.3.9-4.5 4.4 1 6.1-5.5-2.9L6.5 20l1-6.1L3 9.5l6.3-.9z"/></svg></button>
+  <button class="nb" data-p="edu" data-tip="Школьный атлас"><svg viewBox="0 0 24 24"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/></svg></button>
+</div>
+<div id="left" class="glass ui hidden">
+  <div class="lh"><h3 id="lt"></h3><button class="x" id="lx">×</button></div>
+  <div class="lb" id="lb"></div>
+</div>
+
+<!-- ===== RIGHT PANEL ===== -->
+<div id="right" class="glass ui off">
+  <div class="lh"><button class="btn" id="back">← Вся Якутия</button><button class="x" id="rx">×</button></div>
+  <div id="rb"></div>
+</div>
+
+<!-- ===== BOTTOM ===== -->
+<div id="bottom" class="glass ui">
+  <svg id="compass" viewBox="0 0 40 40" title="Север"><circle cx="20" cy="20" r="18" fill="rgba(6,12,24,.6)" stroke="rgba(159,216,255,.4)"/><g id="needle"><path d="M20 5 25 20H15z" fill="#e8c26a"/><path d="M20 35 25 20H15z" fill="#8ea3c2"/></g><text x="20" y="13" font-size="0" fill="#fff">N</text></svg>
+  <div>Курсор: <span class="v" id="cur">—</span></div>
+  <div class="hideM">Высота рельефа: <span class="v" id="elev">—</span></div>
+  <div class="hideM" id="gvalW" style="display:none"><span id="gvalN"></span>: <span class="v" id="gval">—</span></div>
+  <div>Камера: <span class="v" id="camh">—</span></div>
+  <div id="scalebar" class="hideM"><i></i><span class="v" id="scale">—</span></div>
+  <div class="sp" style="flex:1"></div>
+  <div class="hideM muted" id="dataDate"></div>
+</div>
+
+<div id="tip" class="glass hidden"></div>
+<div id="hint" class="glass hidden"></div>
+<div id="flight" class="glass hidden">
+  <span class="ft" id="ftTitle"></span>
+  <button class="btn" id="fPlay">⏸ Пауза</button>
+  <label>Скорость <input type="range" id="fSpeed" min="0.25" max="4" step="0.25" value="1"><span id="fSpeedV">1×</span></label>
+  <label id="fAltWrap">Высота <input type="range" id="fAlt" min="300" max="40000" step="100" value="4000"><span id="fAltV">4000 м</span></label>
+  <button class="btn" id="fStop">■ Стоп</button>
+  <button class="btn" id="fHome">Вернуться на карту</button>
+</div>
+<div id="profile" class="glass hidden"></div>
+<div id="legend" class="glass hidden"><b>Абсолютная высота (DEM)</b><div class="bar"></div><div style="display:flex;justify-content:space-between"><span>0</span><span>1000</span><span>2000</span><span>3000 м</span></div></div>
+<div id="split" class="hidden"><div class="ln"></div><div class="hd" title="Потяните, чтобы сравнить">⇔</div><div class="lb l glass" id="splitL"></div><div class="lb r glass" id="splitR"></div></div>
+<div id="stBadge" class="glass ui hidden"></div>
+<div id="toast" class="glass hidden"></div>
+<div id="modal" class="hidden"></div>
+
+<script>
+'use strict';
+/* =====================================================================
+   САХА 3D — single-file build (v0.1)
+   Модули (в одном файле, разделы помечены):
+   0. Utils & Store          5. RiversLayer / LakesLayer
+   1. EarthGlobe (Viewer)    6. Selection & InfoPanels
+   2. Basemaps/Terrain       7. SearchPanel
+   3. DataService (OSM...)   8. CameraController / VirtualFlight
+   4. DistrictLayer/Nasleg   9. MeasurementTools  10. UI wiring
+   ===================================================================== */
+const C = Cesium;
+
+/* ---------- 0. Utils & Store ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = (n, d = 0) => Number(n).toLocaleString('ru-RU', {maximumFractionDigits: d});
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const TBD = '<span class="tbd">Данные уточняются</span>';
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('saha3d:' + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('saha3d:' + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
+  del(k) { try { localStorage.removeItem('saha3d:' + k); } catch (e) {} }
+};
+/* IndexedDB — кэш для больших тематических слоёв (localStorage для них мал) */
+const IDB = {
+  open() { return this._p || (this._p = new Promise((res, rej) => { const r = indexedDB.open('saha3d', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); })); },
+  async get(k) { try { const db = await this.open(); return await new Promise(res => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(undefined); }); } catch (e) { return undefined; } },
+  async set(k, v) { try { const db = await this.open(); await new Promise(res => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; }); } catch (e) {} }
+};
+const S = {
+  phase: 'intro', lang: 'ru', terrain: false, skip: false, userTouched: 0,
+  republic: null, districts: [], byId: new Map(), places: [], placeById: new Map(),
+  naslegs: new Map(), naslegById: new Map(), rivers: null, lakes: null,
+  sel: null, hover: null, tool: null, base: LS.get('base', 'hybrid'), hillshade: false,
+  index: [], quiz: {on: false}
+};
+function toast(msg, type, action) {
+  const t = $('#toast'); t.className = 'glass' + (type === 'err' ? ' err' : ''); t.innerHTML = '<span>' + msg + '</span>';
+  if (action) { const b = document.createElement('button'); b.className = 'btn'; b.textContent = action.label; b.onclick = () => { t.classList.add('hidden'); action.fn(); }; t.appendChild(b); }
+  clearTimeout(t._h); if (!action) t._h = setTimeout(() => t.classList.add('hidden'), 4500);
+}
+function nm(t) {
+  if (!t) return '';
+  if (S.lang === 'sah') return t['name:sah'] || t['name:ru'] || t.name;
+  if (S.lang === 'en') return t['name:en'] || t.int_name || t.name;
+  return t['name:ru'] || t.name;
+}
+async function fetchJSON(url, opt) {
+  const r = await fetch(url, opt);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+function roundGeom(g) {
+  if (!g) return g;
+  const r = a => typeof a[0] === 'number' ? [Math.round(a[0] * 1e4) / 1e4, Math.round(a[1] * 1e4) / 1e4] : a.map(r);
+  return {type: g.type, coordinates: r(g.coordinates)};
+}
+const polysOf = g => g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
+const linesOf = g => g.type === 'LineString' ? [g.coordinates] : g.type === 'MultiLineString' ? g.coordinates : [];
+const inBbox = (lon, lat, b) => lon >= b[0] && lon <= b[2] && lat >= b[1] && lat <= b[3];
+
+/* ---------- 1. EarthGlobe ---------- */
+C.Ion.defaultAccessToken = LS.get('ion', '') || C.Ion.defaultAccessToken;
+const viewer = new C.Viewer('cesium', {
+  baseLayer: false, baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false,
+  navigationHelpButton: false, animation: false, timeline: false, fullscreenButton: false,
+  infoBox: false, selectionIndicator: false, terrainProvider: new C.EllipsoidTerrainProvider(),
+  msaaSamples: 4, requestRenderMode: false, showRenderLoopErrors: false
+});
+/* Защита от «песочниц» (встроенный просмотр файлов, iframe без сети):
+   там запрещены Web Workers и внешние запросы, поэтому показываем понятную инструкцию. */
+const IN_FRAME = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+function envBlocked(reason, fileMode) {
+  if (document.getElementById('envBox')) return;
+  if (fileMode) {
+    const b = document.createElement('div'); b.id = 'envBox';
+    b.style.cssText = 'position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(2,6,14,.86);padding:20px';
+    b.innerHTML = `<div class="glass" style="max-width:560px;padding:24px;line-height:1.6">
+      <div class="kick">Один шаг до запуска</div>
+      <div class="pt" style="font-size:20px">Откройте атлас через start-saha3d.bat</div>
+      <p class="txt">Страница открыта прямо с диска (file://). В этом режиме браузер запрещает фоновые потоки (Web Workers), без которых CesiumJS не рисует поверхность Земли, границы и заливку улусов.</p>
+      <ol class="txt" style="padding-left:20px">
+        <li>Закройте эту вкладку.</li>
+        <li>В папке атласа дважды щёлкните <b>start-saha3d.bat</b>.</li>
+        <li>Атлас сам откроется по адресу <b>http://localhost:8765</b>. Чёрное окно сервера не закрывайте, пока работаете с атласом.</li>
+      </ol>
+      <div class="muted" style="font-size:12px">Ничего устанавливать не нужно: сервер работает на встроенном в Windows PowerShell. Альтернатива для разработчиков: <code>npx serve .</code> или <code>python -m http.server</code>.</div>
+      <button class="btn" style="margin-top:12px" onclick="this.closest('#envBox').remove()">Всё равно продолжить</button></div>`;
+    document.body.appendChild(b); return;
+  }
+  const b = document.createElement('div'); b.id = 'envBox';
+  b.style.cssText = 'position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(2,6,14,.82);padding:20px';
+  b.innerHTML = `<div class="glass" style="max-width:520px;padding:24px;line-height:1.6">
+    <div class="kick">Нужен обычный браузер</div>
+    <div class="pt" style="font-size:20px">Атлас открыт во встроенном просмотре</div>
+    <p class="txt">Эта среда блокирует загрузку карт, геоданных и фоновые вычисления (Web Workers), поэтому 3D-карта здесь работать не может.</p>
+    <ol class="txt" style="padding-left:20px">
+      <li>Скачайте файл <b>index.html</b> (кнопка загрузки на карточке файла).</li>
+      <li>Откройте его двойным щелчком — в <b>Chrome</b> или <b>Edge</b>.</li>
+      <li>Нужен интернет: карты и границы загружаются онлайн.</li>
+    </ol>
+    <div class="muted" style="font-size:12px">Техническая причина: ${esc(reason)}</div>
+    <button class="btn" style="margin-top:12px" onclick="this.closest('#envBox').remove()">Всё равно продолжить</button></div>`;
+  document.body.appendChild(b);
+}
+const scene = viewer.scene, camera = viewer.camera, globe = scene.globe;
+if (location.protocol === 'file:') envBlocked('file://', true);
+scene.renderError.addEventListener((sc, err) => {
+  console.error(err);
+  envBlocked(String((err && err.message) || err).slice(0, 220));
+});
+viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(C.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+globe.baseColor = C.Color.fromCssColorString('#0b1b33');
+globe.showGroundAtmosphere = true;
+globe.enableLighting = false;
+globe.dynamicAtmosphereLighting = false;
+scene.skyAtmosphere.show = true;
+scene.fog.enabled = true;
+globe.maximumScreenSpaceError = 1.6;
+camera.setView({destination: C.Cartesian3.fromDegrees(40, 22, 2.4e7)});
+const HOME = {destination: C.Cartesian3.fromDegrees(128, 53, 2.9e6), orientation: {heading: 0, pitch: C.Math.toRadians(-62), roll: 0}};
+const ds = name => { const d = new C.CustomDataSource(name); viewer.dataSources.add(d); return d; };
+const dsRep = ds('republic'), dsD = ds('districts'), dsN = ds('naslegs'), dsL = ds('lakes'), dsR = ds('rivers'),
+      dsP = ds('places'), dsSel = ds('selection'), dsH = ds('hover'), dsM = ds('measure'), dsU = ds('marks');
+const GOLD = C.Color.fromCssColorString('#e8c26a'), ICE = C.Color.fromCssColorString('#9fd8ff'), TEAL = C.Color.fromCssColorString('#2dd4bf');
+const PALETTE = ['#2dd4bf','#38bdf8','#818cf8','#a78bfa','#f472b6','#fb923c','#facc15','#4ade80','#22d3ee','#60a5fa','#c084fc','#f87171','#34d399','#fbbf24'];
+
+/* ---------- 2. Basemaps & Terrain ---------- */
+/* Слой описывается спецификацией: так его можно заранее проверить на доступность.
+   Важно: если сервер тайлов не отвечает (например, Esri недоступен из России),
+   Cesium не рисует поверхность глобуса — поэтому каждую подложку сначала «пингуем». */
+const ESRI = s => `https://server.arcgisonline.com/ArcGIS/rest/services/${s}/MapServer/tile/{z}/{y}/{x}`;
+const SPEC = {
+  esriImg:  {url: ESRI('World_Imagery'), max: 19, credit: 'Tiles © Esri, Maxar, Earthstar Geographics'},
+  esriRef:  {url: ESRI('Reference/World_Boundaries_and_Places'), max: 19, credit: '© Esri'},
+  esriPhys: {url: ESRI('World_Terrain_Base'), max: 13, credit: '© Esri, USGS, NOAA'},
+  esriHs:   {url: ESRI('Elevation/World_Hillshade'), max: 16, credit: '© Esri'},
+  voyager:  {url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', sub: 'abcd', max: 18, credit: '© OpenStreetMap contributors, © CARTO'},
+  dark:     {url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', sub: 'abcd', max: 18, credit: '© OpenStreetMap contributors, © CARTO'},
+  topo:     {url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', sub: 'abc', max: 17, credit: '© OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)'},
+  osm:      {url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', max: 19, credit: '© OpenStreetMap contributors'},
+  ne:       {local: true}   // Natural Earth II из пакета Cesium (через jsDelivr) — работает всегда
+};
+const BASES = {
+  hybrid:    {n: 'Гибридная',       L: ['esriImg', 'esriRef']},
+  satellite: {n: 'Спутниковая',     L: ['esriImg']},
+  physical:  {n: 'Физическая',      L: ['esriPhys'], hs: true},
+  political: {n: 'Политико-адм.',   L: ['voyager']},
+  topo:      {n: 'Топографическая', L: ['topo']},
+  osm:       {n: 'OpenStreetMap',   L: ['osm']},
+  dark:      {n: 'Тёмная (атлас)',  L: ['dark']},
+  ne:        {n: 'Natural Earth (офлайн-вид)', L: ['ne']}
+};
+const FALLBACK = ['osm', 'political', 'dark', 'topo', 'ne'];
+S.badBase = new Set();
+const probes = {};
+function probe(key) {
+  const s = SPEC[key];
+  if (s.local) return Promise.resolve(true);
+  if (probes[key]) return probes[key];
+  const url = s.url.replace('{s}', (s.sub || 'a')[0]).replace('{z}', '2').replace('{x}', '3').replace('{y}', '1');
+  return probes[key] = new Promise(res => {
+    const img = new Image(); img.crossOrigin = 'anonymous';   // заодно проверяем CORS, без него WebGL не примет тайл
+    const t = setTimeout(() => { img.src = ''; res(false); }, 7000);
+    img.onload = () => { clearTimeout(t); res(true); };
+    img.onerror = () => { clearTimeout(t); res(false); };
+    img.src = url;
+  });
+}
+function makeLayer(key) {
+  const s = SPEC[key];
+  if (s.local) return C.ImageryLayer.fromProviderAsync(C.TileMapServiceImageryProvider.fromUrl(C.buildModuleUrl('Assets/Textures/NaturalEarthII')));
+  return new C.ImageryLayer(new C.UrlTemplateImageryProvider({url: s.url, maximumLevel: s.max, credit: s.credit, subdomains: s.sub || 'a'}));
+}
+let baseSeq = 0;
+async function setBase(k, auto) {
+  if (!BASES[k]) k = 'osm';
+  const my = ++baseSeq, b = BASES[k];
+  $('#baseSel').value = k;
+  if (!viewer.imageryLayers.length) viewer.imageryLayers.add(makeLayer('ne'));   // глобус виден сразу, пока идёт проверка
+  const ok = await Promise.all(b.L.map(probe));
+  if (my !== baseSeq) return;
+  if (!ok[0]) {
+    S.badBase.add(k);
+    const next = FALLBACK.find(f => f !== k && !S.badBase.has(f)) || 'ne';
+    toast(`Подложка «${b.n}» не отвечает из вашей сети — включаю «${BASES[next].n}»`, 'err');
+    return setBase(next, true);
+  }
+  const L = viewer.imageryLayers; L.removeAll(true);
+  L.add(makeLayer('ne'));                                    // гарантированная основа под любой подложкой
+  if (k !== 'ne') b.L.forEach((key, i) => { if (ok[i]) L.add(makeLayer(key)); });
+  if (S.hillshade || b.hs) {
+    if (await probe('esriHs')) { const h = makeLayer('esriHs'); h.alpha = b.hs ? .55 : .4; L.add(h); }
+    else if (S.hillshade) toast('Отмывка рельефа (Esri) недоступна из вашей сети', 'err');
+  }
+  S.base = k; LS.set('base', k);
+  $('#baseSel').value = k;
+  if (typeof applyOverlays === 'function') applyOverlays();   // снимки/климат — поверх новой подложки
+  if (typeof applyNight === 'function') applyNight();
+  if (S.leftPanel === 'layers' && !$('#left').classList.contains('hidden')) openLeft('layers');
+}
+function rampCanvas() {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 1;
+  const g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 256, 0);
+  [[0,'#0e6b52'],[.1,'#3d9a58'],[.25,'#b9c76b'],[.45,'#d8b05a'],[.65,'#a86b3c'],[.85,'#8a7d78'],[1,'#ffffff']].forEach(s => gr.addColorStop(s[0], s[1]));
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 1); return c;
+}
+function setHypso(on) {
+  globe.material = on && S.terrain ? C.Material.fromType('ElevationRamp', {image: rampCanvas(), minimumHeight: 0, maximumHeight: 3000}) : undefined;
+  $('#legend').classList.toggle('hidden', !(on && S.terrain));
+}
+/* ---- 3D-рельеф ----
+   free: открытые высотные тайлы Terrain Tiles (AWS Open Data, формат Terrarium; источники SRTM, GMTED2010, ETOPO1 и др.).
+         Ключ не нужен. Тайлы в проекции Web Mercator пересэмплируются в географическую сетку Cesium.
+   ion:  Cesium World Terrain (нужен бесплатный токен Cesium ion) — точнее и с нормалями для освещения. */
+const TERRARIUM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/';
+function loadTerrariumTile(z, x, y, cache) {
+  const k = z + '/' + x + '/' + y;
+  if (cache.has(k)) return cache.get(k);
+  const p = new Promise(res => {
+    const img = new Image(); img.crossOrigin = 'anonymous';
+    const t = setTimeout(() => { img.src = ''; res(null); }, 9000);
+    img.onload = () => {
+      clearTimeout(t);
+      try { const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d', {willReadFrequently: true}); g.drawImage(img, 0, 0); res(g.getImageData(0, 0, 256, 256).data); }
+      catch (e) { res(null); }
+    };
+    img.onerror = () => { clearTimeout(t); res(null); };
+    img.src = TERRARIUM + k + '.png';
+  });
+  cache.set(k, p);
+  p.then(d => { if (!d) cache.delete(k); });                       // неудачный тайл не кэшируем — загрузится снова
+  if (cache.size > 400) cache.delete(cache.keys().next().value);
+  return p;
+}
+function freeTerrainProvider() {
+  const N = 65, ts = new C.GeographicTilingScheme(), cache = new Map();
+  const mercY = (lat, n) => { lat = Math.max(-85.05, Math.min(85.05, lat)); const r = lat * Math.PI / 180; return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n; };
+  return new C.CustomHeightmapTerrainProvider({
+    width: N, height: N, tilingScheme: ts,
+    credit: 'Рельеф: Terrain Tiles (Mapzen / AWS Open Data; SRTM, GMTED2010, ETOPO1 и др.)',
+    callback: async (x, y, level) => {
+      const h = new Float32Array(N * N);
+      let missing = false;
+      try {
+        const r = ts.tileXYToRectangle(x, y, level), D = C.Math.toDegrees;
+        const W = D(r.west), E = D(r.east), No = D(r.north), So = D(r.south);
+        const z = Math.min(14, level + 1), n = 2 ** z;
+        const x0 = Math.floor((W + 180) / 360 * n), x1 = Math.min(n - 1, Math.floor((E + 180) / 360 * n - 1e-9));
+        const y0 = Math.floor(mercY(No, n)), y1 = Math.min(n - 1, Math.floor(mercY(So, n) - 1e-9));
+        if ((x1 - x0 + 1) * (y1 - y0 + 1) > 24) return h;               // у полюсов — плоско
+        const tiles = {};
+        const jobs = [];
+        for (let tx = x0; tx <= x1; tx++) for (let ty = y0; ty <= y1; ty++) jobs.push(loadTerrariumTile(z, tx, ty, cache).then(d => { tiles[tx + ',' + ty] = d; }));
+        await Promise.all(jobs);
+        // билинейная интерполяция по центрам пикселей — без «ступенек» на стыках тайлов
+        const px = (d, x, y) => { const o = (y * 256 + x) * 4; return d[o] * 256 + d[o + 1] + d[o + 2] / 256 - 32768; };
+        for (let j = 0; j < N; j++) {
+          // крайние точки тайла лежат ровно на границе исходного тайла — берём их из своего (y0..y1), а не из соседнего
+          const fy = mercY(No - (No - So) * j / (N - 1), n), ty = Math.max(y0, Math.min(y1, Math.floor(fy)));
+          const v = Math.max(0, Math.min(255, (fy - ty) * 256 - .5)), y0p = Math.floor(v), y1p = Math.min(255, y0p + 1), wy = v - y0p;
+          for (let i = 0; i < N; i++) {
+            const fx = (W + (E - W) * i / (N - 1) + 180) / 360 * n, tx = Math.max(x0, Math.min(x1, Math.floor(fx))), d = tiles[tx + ',' + ty];
+            if (!d) { missing = true; continue; }
+            const u = Math.max(0, Math.min(255, (fx - tx) * 256 - .5)), x0p = Math.floor(u), x1p = Math.min(255, x0p + 1), wx = u - x0p;
+            const hv = (px(d, x0p, y0p) * (1 - wx) + px(d, x1p, y0p) * wx) * (1 - wy) + (px(d, x0p, y1p) * (1 - wx) + px(d, x1p, y1p) * wx) * wy;
+            h[j * N + i] = Math.max(0, hv);                                 // море — уровень 0
+          }
+        }
+      } catch (e) { console.warn('terrain tile', e); }
+      // нет данных — отказ: Cesium возьмёт рельеф родительского тайла (без «ям» нулевой высоты)
+      if (missing) throw new Error('terrain tile not loaded');
+      return h;
+    }
+  });
+}
+/* Высоты точек напрямую из тайлов Terrain Tiles (для профиля рельефа) */
+const profileCache = new Map();
+async function terrariumHeights(pts, z = 11) {
+  const n = 2 ** z, out = [];
+  const tileOf = ([lon, lat]) => { const r = lat * Math.PI / 180; return [Math.floor((lon + 180) / 360 * n), Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n)]; };
+  await Promise.all([...new Set(pts.map(p => tileOf(p).join('/')))].map(k => { const [x, y] = k.split('/'); return loadTerrariumTile(z, +x, +y, profileCache); }));   // все тайлы — параллельно
+  for (const [lon, lat] of pts) {
+    const fx = (lon + 180) / 360 * n, r = lat * Math.PI / 180, fy = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n;
+    const tx = Math.floor(fx), ty = Math.floor(fy), d = await loadTerrariumTile(z, tx, ty, profileCache);
+    if (!d) { out.push(null); continue; }
+    const x = Math.min(255, Math.floor((fx - tx) * 256)), y = Math.min(255, Math.floor((fy - ty) * 256)), o = (y * 256 + x) * 4;
+    out.push(Math.max(0, d[o] * 256 + d[o + 1] + d[o + 2] / 256 - 32768));
+  }
+  return out;
+}
+const TERRAIN_NAME = {none: 'без рельефа', free: 'Terrain Tiles (открытые данные, без ключа)', ion: 'Cesium World Terrain'};
+async function setTerrain(src, token, quiet) {
+  try {
+    let tp;
+    if (src === 'ion') {
+      C.Ion.defaultAccessToken = token;
+      tp = await C.createWorldTerrainAsync({requestVertexNormals: true, requestWaterMask: true});
+      LS.set('ion', token);
+    } else if (src === 'free') {
+      const ok = await loadTerrariumTile(7, 109, 30, new Map());       // пробный тайл: Верхоянский хребет
+      if (!ok) throw new Error('сервер высотных тайлов не отвечает из вашей сети');
+      tp = freeTerrainProvider();
+    } else tp = new C.EllipsoidTerrainProvider();
+    viewer.terrainProvider = tp;
+    S.terrain = src !== 'none'; S.terrainSrc = src; LS.set('terrainSrc', src);
+    globe.depthTestAgainstTerrain = S.terrain;
+    if (!S.terrain) setHypso(false); else if (S.layers && S.layers.hypso) setHypso(true);
+    applyLighting();
+    Object.keys(S.th).forEach(renderTheme);   // линии тематических слоёв — прижать к рельефу или снять
+    if (!quiet) toast('3D-рельеф: ' + TERRAIN_NAME[src]);
+  } catch (e) {
+    if (!quiet || src === 'free') toast('Не удалось подключить рельеф (' + TERRAIN_NAME[src] + '): ' + esc(e.message || e), 'err');
+    if (src !== 'none') { viewer.terrainProvider = new C.EllipsoidTerrainProvider(); S.terrain = false; S.terrainSrc = 'none'; globe.depthTestAgainstTerrain = false; }
+  }
+  if (!$('#left').classList.contains('hidden')) openLeft(S.leftPanel);
+}
+const enableTerrain = (token, quiet) => setTerrain('ion', token, quiet);
+function applyLighting() {
+  if (S.dayNight) {
+    scene.light = new C.SunLight(); globe.enableLighting = true; globe.dynamicAtmosphereLighting = true;
+  } else {
+    scene.light = new C.DirectionalLight({direction: C.Cartesian3.clone(camera.directionWC)});
+    // освещение рельефа нужно только с нормалями (Cesium World Terrain); у Terrain Tiles нормалей нет — без него чище
+    globe.enableLighting = S.terrain && S.terrainSrc === 'ion'; globe.dynamicAtmosphereLighting = false;
+  }
+}
+applyLighting();
+
+/* ---------- 3. DataService ---------- */
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+async function fetchTimeout(url, ms, outer) {
+  const ac = new AbortController(), t = setTimeout(() => ac.abort(), ms);
+  if (outer) outer.addEventListener('abort', () => ac.abort());
+  try { return await fetchJSON(url, {signal: ac.signal}); }
+  catch (e) { throw e.name === 'AbortError' ? new Error('нет ответа за ' + Math.round(ms / 1000) + ' с') : e; }
+  finally { clearTimeout(t); }
+}
+/* Публичные серверы Overpass часто перегружены (502/504/429) или «зависают».
+   Запрос уходит сразу на все зеркала. Зеркало, которое быстро отказало, повторяет запрос
+   через ~3 с (у перегруженных серверов слоты освобождаются быстро), пока не истечёт общий срок.
+   Берётся первый успешный ответ, остальные запросы отменяются. */
+async function mirrorLoop(u, q, deadline, stop) {
+  let last = new Error('нет ответа');
+  while (!stop.signal.aborted && Date.now() < deadline - 1500) {
+    try {
+      const r = await fetchTimeout(u + '?data=' + encodeURIComponent(q), deadline - Date.now(), stop.signal);
+      if (!r || !Array.isArray(r.elements)) throw new Error('пустой ответ');
+      if (r.remark && /runtime error|timed out|out of memory/i.test(r.remark)) throw new Error(r.remark.slice(0, 80));
+      return r;
+    } catch (e) { last = e; if (stop.signal.aborted) break; await sleep(2500 + Math.random() * 1500); }
+  }
+  throw last;
+}
+async function overpass(q, onRetry, ms = 60000) {
+  const stop = new AbortController(), deadline = Date.now() + ms;
+  try {
+    // GET с простой строкой (без URLSearchParams) — совместимо со всеми окружениями
+    const j = await Promise.any(OVERPASS.map(u => mirrorLoop(u, q, deadline, stop)));
+    stop.abort();
+    return j;
+  } catch (e) {
+    stop.abort();
+    const last = e.errors ? [...new Set(e.errors.map(x => x.message))].join('; ') : e.message;
+    console.warn('Overpass', last);
+    throw new Error('серверы OpenStreetMap (Overpass) перегружены или недоступны (' + last + '). Попробуйте через минуту');
+  }
+}
+async function nominatimPolygons(ids, thr) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += 45) {
+    if (i) await sleep(1100);
+    const u = `https://nominatim.openstreetmap.org/lookup?format=geojson&polygon_geojson=1&polygon_threshold=${thr}&osm_ids=${ids.slice(i, i + 45).map(x => typeof x === 'number' ? 'R' + x : x).join(',')}`;
+    const j = await fetchTimeout(u, 40000);
+    out.push(...j.features);
+  }
+  return out;
+}
+const Q_MAIN = `[out:json][timeout:120];
+rel["ISO3166-2"="RU-SA"]["boundary"="administrative"]->.r;
+.r out tags;
+.r map_to_area->.a;
+rel(area.a)["boundary"="administrative"]["admin_level"="6"]->.d;
+.d out tags;
+node(r.d:"admin_centre");
+out ids;
+node(area.a)["place"~"^(city|town|village|hamlet)$"];
+out;`;
+/* Снимок геоданных, опубликованный вместе с сайтом (data/*.json), читается первым:
+   сайт открывается быстро и не нагружает публичные серверы OSM. Живые API — запасной вариант. */
+async function snap(path) {
+  if (location.protocol === 'file:') return null;
+  try { const r = await fetch('data/' + path, {cache: 'no-cache'}); return r.ok ? await r.json() : null; } catch (e) { return null; }
+}
+async function loadMain(progress) {
+  const sn = await snap('main.json');
+  if (sn && sn.districts) { S.fromSnapshot = true; return sn; }
+  const cached = LS.get('main_v1');
+  if (cached && Date.now() - cached.t < 14 * 864e5) return cached;
+  progress('Запрашиваем административное деление (OpenStreetMap / Overpass)…');
+  const j = await overpass(Q_MAIN, null, 90000);
+  const rels = j.elements.filter(e => e.type === 'relation');
+  const rep = rels.find(e => e.tags && e.tags['ISO3166-2'] === 'RU-SA');
+  if (!rep) throw new Error('граница республики не найдена в OSM');
+  const dRels = rels.filter(e => e.tags && e.tags.admin_level === '6');
+  const centreIds = new Set(j.elements.filter(e => e.type === 'node' && e.lat === undefined).map(e => e.id));
+  const seen = new Set(), places = [];
+  for (const e of j.elements) {
+    if (e.type !== 'node' || e.lat === undefined || !e.tags || !e.tags.name || seen.has(e.id)) continue;
+    seen.add(e.id);
+    places.push({id: e.id, lon: +e.lon.toFixed(5), lat: +e.lat.toFixed(5), tags: e.tags, centre: centreIds.has(e.id)});
+  }
+  progress('Загружаем контур республики (Nominatim)…');
+  const [repF] = await nominatimPolygons([rep.id], 0.01);
+  await sleep(1100);
+  progress(`Загружаем границы ${dRels.length} районов и округов…`);
+  const dF = await nominatimPolygons(dRels.map(r => r.id), 0.004);
+  const geom = new Map(dF.map(f => [f.properties.osm_id, f.geometry]));
+  const districts = dRels.map(r => ({id: r.id, tags: r.tags, geometry: roundGeom(geom.get(r.id))}))
+    .filter(d => d.geometry && /Polygon/.test(d.geometry.type));
+  const data = {t: Date.now(), republic: {id: rep.id, tags: rep.tags, geometry: roundGeom(repF.geometry)}, districts, places};
+  if (!LS.set('main_v1', data)) console.warn('cache: не хватило места в localStorage');
+  return data;
+}
+const NE = 'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@v5.1.2/geojson/';
+async function loadNE(files) {
+  for (const f of files) { try { const j = await fetchJSON(NE + f); j._src = f; return j; } catch (e) { console.warn(f, e); } }
+  throw new Error('Natural Earth недоступен');
+}
+/* Wikidata / Wikipedia */
+async function wd(ids, props = 'claims|labels|sitelinks') {
+  const u = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${ids.join('|')}&props=${props}&languages=ru|sah|en&sitefilter=ruwiki|sahwiki|enwiki&format=json&origin=*`;
+  return (await fetchJSON(u)).entities || {};
+}
+function claimBest(e, p) {
+  let cs = ((e.claims || {})[p] || []).filter(c => c.mainsnak && c.mainsnak.datavalue && c.rank !== 'deprecated');
+  if (!cs.length) return null;
+  const pref = cs.filter(c => c.rank === 'preferred'); if (pref.length) cs = pref;
+  const date = c => (((c.qualifiers || {}).P585 || [])[0] || {}).datavalue?.value?.time || '';
+  cs.sort((a, b) => date(a) < date(b) ? 1 : -1);
+  return {v: cs[0].mainsnak.datavalue.value, date: date(cs[0]).slice(1, 5)};
+}
+const claimAll = (e, p) => ((e.claims || {})[p] || []).map(c => c.mainsnak.datavalue && c.mainsnak.datavalue.value).filter(Boolean);
+const UNITS = {Q712226: ['км²', 1], Q25343: ['км²', 1e-6], Q35852: ['км²', .01], Q828224: ['км', 1], Q11573: ['м', 1]};
+function qty(v) {
+  const a = parseFloat(v.amount), u = UNITS[(v.unit || '').split('/').pop()];
+  return u ? fmt(a * u[1], a * u[1] < 10 ? 2 : 0) + ' ' + u[0] : fmt(a);
+}
+const commons = (f, w = 160) => `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(f)}?width=${w}`;
+async function wikiSummary(title, lang = 'ru') {
+  return fetchJSON(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}`);
+}
+
+/* ---------- 4. DistrictLayer / NaslegLayer / Places ---------- */
+function hierarchy(poly) {
+  return new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray(poly[0].flat()),
+    poly.slice(1).map(h => new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray(h.flat()))));
+}
+function addRings(dsx, geom, material, width, tag) {
+  const out = [];
+  polysOf(geom).forEach(p => p.forEach(ring => {
+    const e = dsx.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(ring.flat()), width, material, clampToGround: true}});
+    if (tag) e.saha = tag; out.push(e);
+  }));
+  return out;
+}
+function prepArea(o) {
+  o.f = {type: 'Feature', geometry: o.geometry, properties: {}};
+  o.pt = turf.pointOnFeature(o.f).geometry.coordinates;
+  o.bbox = turf.bbox(o.f); o.area = turf.area(o.f) / 1e6;
+  return o;
+}
+function build(data) {
+  S.dataDate = new Date(data.t);
+  $('#dataDate').textContent = 'Геоданные OSM от ' + S.dataDate.toLocaleDateString('ru-RU');
+  S.republic = prepArea({...data.republic});
+  S.districts = []; S.byId.clear();
+  for (const d of data.districts) {
+    try { prepArea(d); } catch (e) { continue; }
+    if (!turf.booleanPointInPolygon(d.pt, S.republic.f)) continue;
+    d.places = []; d.centre = null; S.districts.push(d);
+  }
+  S.districts.sort((a, b) => nm(a.tags).localeCompare(nm(b.tags), 'ru'));
+  S.districts.forEach((d, i) => { d.color = C.Color.fromCssColorString(PALETTE[i % PALETTE.length]); S.byId.set(d.id, d); });
+  S.places = data.places; S.placeById.clear();
+  const rank = {city: 4, town: 3, village: 2, hamlet: 1};
+  for (const p of S.places) {
+    S.placeById.set(p.id, p);
+    for (const d of S.districts) {
+      if (!inBbox(p.lon, p.lat, d.bbox) || !turf.booleanPointInPolygon([p.lon, p.lat], d.f)) continue;
+      p.d = d.id; d.places.push(p);
+      if (p.centre && (!d.centre || rank[p.tags.place] > rank[d.centre.tags.place])) d.centre = p;
+      break;
+    }
+  }
+  // republic outline
+  dsRep.entities.removeAll();
+  addRings(dsRep, S.republic.geometry, new C.PolylineGlowMaterialProperty({glowPower: .25, color: GOLD}), 7);
+  dsRep.show = false;
+  renderDistricts(); renderPlaces(); buildIndex();
+}
+function renderDistricts() {
+  dsD.entities.removeAll();
+  for (const d of S.districts) {
+    const tag = {kind: 'district', id: d.id};
+    d.fill = polysOf(d.geometry).map(p => {
+      const e = dsD.entities.add({polygon: {hierarchy: hierarchy(p), material: d.color.withAlpha(.2)}});
+      e.saha = tag; return e;
+    });
+    addRings(dsD, d.geometry, C.Color.WHITE.withAlpha(.55), 1.3, tag);
+    d.label = dsD.entities.add({
+      position: C.Cartesian3.fromDegrees(d.pt[0], d.pt[1]),
+      label: {text: nm(d.tags), font: '600 13px Manrope, sans-serif', fillColor: C.Color.WHITE, outlineColor: C.Color.fromCssColorString('#020617'),
+        outlineWidth: 3, style: C.LabelStyle.FILL_AND_OUTLINE, heightReference: C.HeightReference.CLAMP_TO_GROUND,
+        distanceDisplayCondition: new C.DistanceDisplayCondition(0, 6e6), disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        scaleByDistance: new C.NearFarScalar(4e5, 1.15, 5e6, .7)}
+    });
+    d.label.saha = tag;
+  }
+}
+const PLACE_TYPE = {city: 'Город', town: 'Город / посёлок городского типа', village: 'Село / посёлок', hamlet: 'Малый населённый пункт'};
+function renderPlaces() {
+  dsP.entities.removeAll();
+  const st = {
+    city:    {px: 8, col: GOLD, pd: 1.2e7, ld: 3.5e6, f: '700 13px Manrope'},
+    town:    {px: 6, col: GOLD, pd: 6e6, ld: 1.6e6, f: '600 12px Manrope'},
+    village: {px: 4, col: ICE, pd: 1.5e6, ld: 4e5, f: '500 11px Manrope'},
+    hamlet:  {px: 3, col: ICE.withAlpha(.8), pd: 6e5, ld: 1.2e5, f: '500 10px Manrope'}
+  };
+  for (const p of S.places) {
+    const s = st[p.tags.place] || st.hamlet, big = p.centre ? 1.25 : 1;
+    p.ent = dsP.entities.add({
+      position: C.Cartesian3.fromDegrees(p.lon, p.lat),
+      point: {pixelSize: s.px * big, color: s.col, outlineColor: C.Color.fromCssColorString('#020617'), outlineWidth: 1.5,
+        heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        distanceDisplayCondition: new C.DistanceDisplayCondition(0, p.centre ? Math.max(s.pd, 3e6) : s.pd)},
+      label: {text: nm(p.tags), font: s.f + ', sans-serif', fillColor: C.Color.WHITE, outlineColor: C.Color.fromCssColorString('#020617'), outlineWidth: 3,
+        style: C.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new C.Cartesian2(0, -12), heightReference: C.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY, distanceDisplayCondition: new C.DistanceDisplayCondition(0, p.centre ? Math.max(s.ld, 1.2e6) : s.ld)}
+    });
+    p.ent.saha = {kind: 'place', id: p.id};
+  }
+}
+function paintDistricts(selId) {
+  const dark = C.Color.fromCssColorString('#020617').withAlpha(.5);
+  for (const d of S.districts) {
+    const m = !selId ? d.color.withAlpha(.2) : d.id === selId ? d.color.withAlpha(.04) : dark;
+    d.fill.forEach(e => { e.polygon.material = m; });
+  }
+}
+function refreshLabels() {
+  S.districts.forEach(d => { d.label.label.text = nm(d.tags); });
+  S.places.forEach(p => { if (p.ent) p.ent.label.text = nm(p.tags); });
+  dsN.entities.values.forEach(e => { if (e.label && e.saha) { const n = S.naslegById.get(e.saha.id); if (n) e.label.text = nm(n.tags); } });
+  buildIndex(); if (!$('#left').classList.contains('hidden')) openLeft(S.leftPanel);
+  if (S.sel) openObject(S.sel, true);
+}
+async function loadNaslegs(d) {
+  if (S.naslegs.has(d.id)) return S.naslegs.get(d.id);
+  const ck = 'nas_v1_' + d.id;
+  let data = LS.get(ck) || await snap('naslegs/' + d.id + '.json');
+  if (!data) {
+    const j = await overpass(`[out:json][timeout:90];rel(${d.id});map_to_area->.a;rel(area.a)["boundary"="administrative"]["admin_level"="8"];out tags;`);
+    const rels = j.elements.filter(e => e.type === 'relation');
+    data = [];
+    if (rels.length) {
+      const fs = await nominatimPolygons(rels.map(r => r.id), 0.002);
+      const g = new Map(fs.map(f => [f.properties.osm_id, f.geometry]));
+      data = rels.map(r => ({id: r.id, tags: r.tags, geometry: roundGeom(g.get(r.id))})).filter(x => x.geometry && /Polygon/.test(x.geometry.type));
+    }
+    LS.set(ck, data);
+  }
+  const list = [];
+  for (const n of data) {
+    try { prepArea(n); } catch (e) { continue; }
+    if (!turf.booleanPointInPolygon(n.pt, d.f)) continue;
+    n.parent = d.id;
+    n.places = d.places.filter(p => inBbox(p.lon, p.lat, n.bbox) && turf.booleanPointInPolygon([p.lon, p.lat], n.f));
+    list.push(n); S.naslegById.set(n.id, n);
+  }
+  list.sort((a, b) => nm(a.tags).localeCompare(nm(b.tags), 'ru'));
+  S.naslegs.set(d.id, list); buildIndex();
+  return list;
+}
+function renderNaslegs(list) {
+  dsN.entities.removeAll();
+  for (const n of list) {
+    const tag = {kind: 'nasleg', id: n.id};
+    polysOf(n.geometry).forEach(p => { const e = dsN.entities.add({polygon: {hierarchy: hierarchy(p), material: TEAL.withAlpha(.12)}}); e.saha = tag; });
+    addRings(dsN, n.geometry, TEAL.withAlpha(.85), 1.2, tag);
+    const l = dsN.entities.add({position: C.Cartesian3.fromDegrees(n.pt[0], n.pt[1]),
+      label: {text: nm(n.tags), font: 'italic 600 11px Manrope, sans-serif', fillColor: C.Color.fromCssColorString('#a7f3e4'),
+        outlineColor: C.Color.fromCssColorString('#020617'), outlineWidth: 3, style: C.LabelStyle.FILL_AND_OUTLINE,
+        heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        distanceDisplayCondition: new C.DistanceDisplayCondition(0, 9e5)}});
+    l.saha = tag;
+  }
+}
+
+/* ---------- 5. RiversLayer / LakesLayer (Natural Earth 1:10M) ---------- */
+const P = (o, k) => o[k] ?? o[k.toUpperCase()];
+function touchesRep(lines) {
+  const rep = S.republic && S.republic.f; if (!rep) return true;
+  for (const l of lines) for (let i = 0; i < l.length; i += 3) if (turf.booleanPointInPolygon(l[i], rep)) return true;
+  return false;
+}
+/* В geojson Natural Earth у рек нет русских названий и wikidataid (у озёр есть).
+   Русские названия рек, которые попадают в Якутию в слое NE 1:10M: */
+const RIVER_RU = {
+  'Lena': 'Лена', 'Bykovskaya Protoka': 'Быковская протока', 'Olenekskaya Protoka': 'Оленёкская протока', 'Aldan': 'Алдан',
+  'Kolyma': 'Колыма', 'Indigirka': 'Индигирка', 'Trofimovskaya Protoka': 'Трофимовская протока', 'Tumatskaya Protoka': 'Туматская протока',
+  'Vilyuy': 'Вилюй', 'Olenëk': 'Оленёк', 'Vitim': 'Витим', 'Olëkma': 'Олёкма', 'Sartang': 'Сартанг', 'Omolon': 'Омолон',
+  'Bol’shaya Kuonamka': 'Большая Куонамка', 'Anabar': 'Анабар', 'Yana': 'Яна', 'Alazeya': 'Алазея', 'Popigay': 'Попигай',
+  'Bol’shoy Anyuy': 'Большой Анюй', 'Moma': 'Мома', 'Adycha': 'Адыча', 'Maya': 'Мая', 'Tyung': 'Тюнг', 'Dulgalakh': 'Дулгалах',
+  'Udzha': 'Уджа', 'Markha': 'Марха', 'Selennyakh': 'Селеннях', 'Bytantay': 'Бытантай', 'Uchur': 'Учур', 'Chara': 'Чара',
+  'Ozhogina': 'Ожогина', 'Amga': 'Амга', 'Muna': 'Муна', 'Tompo': 'Томпо', 'Timpton': 'Тимптон', 'Undyulyung': 'Ундюлюнг'
+};
+/* Wikidata-элемент реки ищем по русскому названию; принимаем только результат с описанием «река/протока» */
+async function riverQid(r) {
+  if (r.qid !== undefined) return r.qid;
+  r.qid = null;
+  try {
+    const u = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(r.name)}&language=ru&uselang=ru&type=item&limit=7&format=json&origin=*`;
+    const j = await fetchTimeout(u, 15000);
+    const hit = (j.search || []).find(x => /(^|\s)(река|протока)/i.test(x.description || '') && (x.label || '').toLowerCase() === r.name.toLowerCase());
+    if (hit) r.qid = hit.id;
+  } catch (e) { console.warn('riverQid', e); }
+  return r.qid;
+}
+async function loadRivers() {
+  if (S.rivers) return S.rivers;
+  const sn = await snap('rivers.json');
+  if (sn && sn.rivers) { S.rivers = sn.rivers; S.riversSrc = sn.src; S.riverById = new Map(S.rivers.map(r => [r.id, r])); return S.rivers; }
+  const j = await loadNE(['ne_10m_rivers_lake_centerlines.geojson', 'ne_50m_rivers_lake_centerlines.geojson']);
+  const B = [100, 54, 166, 78], map = new Map();
+  for (const f of j.features) {
+    if (!f.geometry) continue;
+    const ls = linesOf(f.geometry); const b = turf.bbox(f);
+    if (b[2] < B[0] || b[0] > B[2] || b[3] < B[1] || b[1] > B[3] || !touchesRep(ls)) continue;
+    const pr = f.properties || {}, en = P(pr, 'name_en') || P(pr, 'name'), name = P(pr, 'name_ru') || RIVER_RU[en] || en;
+    if (!name) continue;
+    const key = 'r:' + name;
+    if (!map.has(key)) map.set(key, {id: key, name, name_en: en, qid: P(pr, 'wikidataid'), rank: P(pr, 'scalerank'), cls: P(pr, 'featurecla'), lines: []});
+    const r = map.get(key); r.lines.push(...ls); if (!r.qid) r.qid = P(pr, 'wikidataid');
+    r.rank = Math.min(r.rank ?? 99, P(pr, 'scalerank') ?? 99);
+  }
+  S.rivers = [...map.values()].sort((a, b) => a.rank - b.rank); S.riversSrc = j._src;
+  S.riverById = new Map(S.rivers.map(r => [r.id, r]));
+  return S.rivers;
+}
+function renderRivers() {
+  dsR.entities.removeAll();
+  for (const r of S.rivers) {
+    const w = Math.max(1.4, 4.2 - (r.rank || 6) * .35);
+    r.ents = r.lines.map(l => { const e = dsR.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(l.flat()), width: w, material: C.Color.fromCssColorString('#5fd4ff').withAlpha(.92), clampToGround: true}}); e.saha = {kind: 'river', id: r.id}; return e; });
+  }
+}
+async function loadLakes() {
+  if (S.lakes) return S.lakes;
+  const sn = await snap('lakes.json');
+  if (sn && sn.lakes) { S.lakes = sn.lakes.map(l => ({...l, f: {type: 'Feature', geometry: l.geometry, properties: {}}})); S.lakeById = new Map(S.lakes.map(l => [l.id, l])); S.lakesSrc = sn.src; return S.lakes; }
+  const j = await loadNE(['ne_10m_lakes.geojson', 'ne_50m_lakes.geojson']);
+  const B = [100, 54, 166, 78]; const out = [];
+  for (const f of j.features) {
+    if (!f.geometry) continue; const b = turf.bbox(f);
+    if (b[2] < B[0] || b[0] > B[2] || b[3] < B[1] || b[1] > B[3]) continue;
+    const c = turf.pointOnFeature(f).geometry.coordinates;
+    if (S.republic && !turf.booleanPointInPolygon(c, S.republic.f)) continue;
+    const pr = f.properties || {}, name = P(pr, 'name_ru') || P(pr, 'name') || 'Озеро без названия (NE)';
+    out.push({id: 'l:' + (P(pr, 'ne_id') || out.length), name, qid: P(pr, 'wikidataid'), geometry: f.geometry, f, pt: c, bbox: b, area: turf.area(f) / 1e6});
+  }
+  S.lakes = out; S.lakeById = new Map(out.map(l => [l.id, l])); S.lakesSrc = j._src;
+  return out;
+}
+function renderLakes() {
+  dsL.entities.removeAll();
+  for (const l of S.lakes) {
+    polysOf(l.geometry).forEach(p => { const e = dsL.entities.add({polygon: {hierarchy: hierarchy(p), material: C.Color.fromCssColorString('#38a9f0').withAlpha(.8)}}); e.saha = {kind: 'lake', id: l.id}; });
+  }
+}
+/* ---------- 5b. ThematicLayers (OpenStreetMap, Overpass) ---------- */
+/* Каждый слой — реальные объекты OSM внутри границы республики. Ничего не дорисовываем:
+   если у объекта нет атрибута, в карточке «Данные уточняются». */
+const THEMES = {
+  oopt:     {n: 'Охраняемые природные территории', g: 'Природа', icon: '🌲', color: '#4ade80', poly: true, far: 6e6, lfar: 1.5e6,
+             q: a => `(nwr${a}["boundary"~"^(protected_area|national_park)$"]["name"];nwr${a}["leisure"="nature_reserve"]["name"];);out tags center;`},
+  peaks:    {n: 'Вершины', g: 'Горы и рельеф', icon: '▲', color: '#e8c26a', far: 2.5e6, lfar: 6e5,
+             q: a => `node${a}["natural"="peak"]["name"];out;`},
+  ridges:   {n: 'Горные хребты', g: 'Горы и рельеф', color: '#d6b48a', width: 2.6, lfar: 1.5e6,
+             q: a => `way${a}["natural"~"^(ridge|arete)$"]["name"];out geom;`},
+  airports: {n: 'Аэропорты и аэродромы', g: 'Транспорт', icon: '✈', color: '#38bdf8', far: 8e6, lfar: 1.8e6,
+             q: a => `nwr${a}["aeroway"="aerodrome"];out tags center;`},
+  rail:     {n: 'Железные дороги', g: 'Транспорт', color: '#f472b6', width: 3,
+             q: a => `way${a}["railway"="rail"];out geom;`},
+  roads:    {n: 'Основные автодороги', sub: 'OSM: trunk и primary', g: 'Транспорт', color: '#fb923c', width: 2.4,
+             q: a => `way${a}["highway"~"^(trunk|primary)$"];out geom;`},
+  winter:   {n: 'Зимники (сезонные дороги)', sub: 'OSM: winter_road, ice_road, seasonal=winter', g: 'Транспорт', color: '#bfefff', width: 2, dash: true,
+             q: a => `(way${a}["winter_road"="yes"];way${a}["ice_road"="yes"];way${a}["highway"]["seasonal"="winter"];);out geom;`},
+  ferries:  {n: 'Переправы и порты', g: 'Транспорт', icon: '⚓', color: '#22d3ee', width: 2, dash: true, far: 4e6, lfar: 8e5,
+             q: a => `way${a}["route"="ferry"];out geom;(nwr${a}["amenity"="ferry_terminal"];nwr${a}["landuse"="port"];nwr${a}["harbour"="yes"];nwr${a}["industrial"="port"];);out tags center;`},
+  tourism:  {n: 'Туризм и достопримечательности', sub: 'музеи, достопримечательности, смотровые, памятники', g: 'Туризм и культура', icon: '★', color: '#facc15', far: 3e6, lfar: 3e5,
+             q: a => `(nwr${a}["tourism"~"^(attraction|viewpoint|museum)$"]["name"];nwr${a}["historic"~"^(monument|memorial|archaeological_site|ruins|fort)$"]["name"];);out tags center;`},
+  culture:  {n: 'Библиотеки, клубы, театры', g: 'Туризм и культура', icon: '📚', color: '#c084fc', far: 1.5e6, lfar: 2e5,
+             q: a => `nwr${a}["amenity"~"^(library|community_centre|arts_centre|theatre)$"];out tags center;`},
+  edu:      {n: 'Образование', sub: 'школы, детские сады, колледжи, вузы', g: 'Социальная инфраструктура', icon: '🎓', color: '#a78bfa', far: 1.2e6, lfar: 1.5e5,
+             q: a => `nwr${a}["amenity"~"^(school|kindergarten|college|university)$"];out tags center;`},
+  health:   {n: 'Медицина', sub: 'больницы, поликлиники, ФАПы', g: 'Социальная инфраструктура', icon: '✚', color: '#f87171', far: 1.2e6, lfar: 1.5e5,
+             q: a => `nwr${a}["amenity"~"^(hospital|clinic|doctors)$"];out tags center;`}
+};
+S.th = {}; S.thById = {}; S.thDate = {};
+const dsT = {};
+const themeDS = k => dsT[k] || (dsT[k] = ds('th_' + k));
+const TAGL = {
+  official_name: 'Официальное название', operator: 'Оператор', iata: 'Код IATA', icao: 'Код ICAO', aerodrome: 'Тип аэродрома',
+  ele: 'Высота, м', ref: 'Номер дороги', surface: 'Покрытие', seasonal: 'Сезонность', winter_road: 'Зимник', ice_road: 'Ледовая дорога',
+  protection_title: 'Категория', protect_class: 'Класс охраны (OSM)', start_date: 'Дата основания', opening_hours: 'Часы работы',
+  website: 'Сайт', phone: 'Телефон', 'addr:city': 'Населённый пункт', 'addr:street': 'Улица', 'addr:housenumber': 'Дом',
+  heritage: 'Объект наследия', description: 'Описание', capacity: 'Вместимость', beds: 'Койко-мест', 'isced:level': 'Уровень образования (ISCED)'
+};
+const VAL = {
+  trunk: 'магистральная (trunk)', primary: 'основная (primary)', secondary: 'дорога регионального значения (secondary)', tertiary: 'местная дорога (tertiary)', unclassified: 'дорога без класса', track: 'грунтовая дорога / колея', service: 'служебный проезд', residential: 'улица', winter_road: 'зимник', winter: 'только зимой', yes: 'да', museum: 'музей', attraction: 'достопримечательность',
+  viewpoint: 'смотровая площадка', monument: 'памятник', memorial: 'мемориал', archaeological_site: 'археологический памятник', ruins: 'руины', fort: 'острог / крепость',
+  school: 'школа', kindergarten: 'детский сад', college: 'колледж', university: 'университет', hospital: 'больница', clinic: 'поликлиника', doctors: 'врачебный пункт / ФАП',
+  library: 'библиотека', community_centre: 'клуб / культурный центр', arts_centre: 'центр искусств', theatre: 'театр', national_park: 'национальный парк',
+  protected_area: 'охраняемая территория', nature_reserve: 'заповедник / резерват', aerodrome: 'аэродром', ferry: 'паромная переправа', ferry_terminal: 'паромный причал',
+  port: 'порт', peak: 'вершина', ridge: 'хребет / гряда', arete: 'гребень', rail: 'железная дорога', international: 'международный', regional: 'региональный', public: 'гражданский'
+};
+const vt = v => VAL[v] || v;
+function themeKind(o) { const t = o.tags || {}; return vt(t.tourism || t.historic || t.amenity || t.aeroway || t.boundary || t.leisure || t.route || t.landuse || t.natural || t.railway || t.highway || ''); }
+function parseEls(els) {
+  const out = [];
+  for (const e of els) {
+    const id = e.type[0] + e.id, tags = e.tags || {};
+    if (Array.isArray(e.geometry)) {
+      let c = e.geometry.filter(Boolean).map(g => [+g.lon.toFixed(5), +g.lat.toFixed(5)]);
+      if (c.length < 2) continue;
+      if (c.length > 4) { try { c = turf.simplify(turf.lineString(c), {tolerance: .0012}).geometry.coordinates; } catch (x) {} }
+      out.push({id, tags, line: c});
+    } else {
+      const lat = e.lat ?? (e.center && e.center.lat), lon = e.lon ?? (e.center && e.center.lon);
+      if (lat != null) out.push({id, tags, pt: [+lon.toFixed(5), +lat.toFixed(5)]});
+    }
+  }
+  return out;
+}
+async function loadTheme(k) {
+  if (S.th[k]) return S.th[k];
+  const T = THEMES[k], ck = 'th_v1_' + k;
+  let c = await IDB.get(ck);
+  if (!c) c = await snap('themes/' + k + '.json');                // снимок, опубликованный с сайтом
+  if (!c || (!c.snap && Date.now() - c.t > 14 * 864e5)) {
+    if (!S.republic) throw new Error('сначала должны загрузиться границы республики');
+    const j = await overpass(`[out:json][timeout:180];rel(${S.republic.id});map_to_area->.a;${T.q('(area.a)')}`, null, 120000);
+    const items = parseEls(j.elements);
+    if (T.poly) {
+      const key = o => o.id[0].toUpperCase() + o.id.slice(1);
+      const ids = items.filter(o => /^[wr]/.test(o.id)).map(key);
+      if (ids.length) {
+        const fs = await nominatimPolygons(ids, .003);
+        const g = new Map(fs.map(f => [f.properties.osm_type[0].toUpperCase() + f.properties.osm_id, f.geometry]));
+        items.forEach(o => { const gg = g.get(key(o)); if (gg && /Polygon/.test(gg.type)) o.geometry = roundGeom(gg); });
+      }
+    }
+    c = {t: Date.now(), items};
+    IDB.set(ck, c);
+  }
+  S.th[k] = c.items; S.thDate[k] = c.t; S.thById[k] = new Map(c.items.map(o => [o.id, o]));
+  return c.items;
+}
+const iconCache = {};
+function themeIcon(k) {
+  if (iconCache[k]) return iconCache[k];
+  const T = THEMES[k], c = document.createElement('canvas'); c.width = c.height = 48;
+  const g = c.getContext('2d');
+  g.beginPath(); g.arc(24, 24, 20, 0, Math.PI * 2); g.fillStyle = 'rgba(6,12,24,.88)'; g.fill();
+  g.lineWidth = 3; g.strokeStyle = T.color; g.stroke();
+  g.font = '22px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = T.color; g.fillText(T.icon || '●', 24, 26);
+  return iconCache[k] = c.toDataURL();
+}
+function renderTheme(k) {
+  const T = THEMES[k], d = themeDS(k), col = C.Color.fromCssColorString(T.color);
+  d.entities.removeAll();
+  for (const o of S.th[k]) {
+    const tag = {kind: 'theme', key: k, id: o.id}, name = nm(o.tags);
+    if (o.geometry) {
+      polysOf(o.geometry).forEach(p => { const e = d.entities.add({polygon: {hierarchy: hierarchy(p), material: col.withAlpha(.22)}}); e.saha = tag; });
+      addRings(d, o.geometry, col.withAlpha(.9), 1.6, tag);
+    }
+    if (o.line && k === 'ridges' && name && o.line.length > 3) {
+      const mid = o.line[Math.floor(o.line.length / 2)];
+      const e = d.entities.add({position: C.Cartesian3.fromDegrees(mid[0], mid[1]), label: {text: name, font: 'italic 600 12px Manrope, sans-serif', fillColor: C.Color.fromCssColorString('#f3dcb6'),
+        outlineColor: C.Color.fromCssColorString('#020617'), outlineWidth: 3, style: C.LabelStyle.FILL_AND_OUTLINE, heightReference: C.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY, distanceDisplayCondition: new C.DistanceDisplayCondition(0, T.lfar)}});
+      e.saha = tag;
+    }
+    if (o.line) {
+      // без DEM обычные линии на эллипсоиде заметно легче тысяч «прижатых к земле» линий
+      const e = d.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(o.line.flat()), width: T.width || 2, clampToGround: S.terrain, arcType: C.ArcType.GEODESIC,
+        material: T.dash ? new C.PolylineDashMaterialProperty({color: col, dashLength: 14}) : col}});
+      e.saha = tag;
+    }
+    if (o.pt) {
+      const e = d.entities.add({position: C.Cartesian3.fromDegrees(o.pt[0], o.pt[1]),
+        billboard: o.geometry ? undefined : {image: themeIcon(k), width: 24, height: 24, heightReference: C.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY, distanceDisplayCondition: new C.DistanceDisplayCondition(0, T.far || 3e6)},
+        label: name ? {text: name + (k === 'peaks' && o.tags.ele ? ' · ' + o.tags.ele + ' м' : ''), font: '600 11px Manrope, sans-serif', fillColor: C.Color.WHITE,
+          outlineColor: C.Color.fromCssColorString('#020617'), outlineWidth: 3, style: C.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new C.Cartesian2(0, o.geometry ? 0 : -19),
+          heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          distanceDisplayCondition: new C.DistanceDisplayCondition(0, T.lfar || 4e5)} : undefined});
+      e.saha = tag; o.ent = e;
+    }
+  }
+}
+function selectTheme(k, id, silent) {
+  const o = S.thById[k] && S.thById[k].get(id); if (!o) return;
+  const T = THEMES[k], ref = {kind: 'theme', key: k, id}; S.sel = ref;
+  const name = nm(o.tags) || (themeKind(o) ? themeKind(o)[0].toUpperCase() + themeKind(o).slice(1) : 'Объект') + ' без названия';
+  if (!silent) {
+    stopFlight(); paintDistricts(null); dsSel.entities.removeAll();
+    if (o.geometry) { outline(o.geometry, 4); flyToBbox(turf.bbox(o.geometry), -55); }
+    else if (o.line) {
+      dsSel.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(o.line.flat()), width: 9, clampToGround: true, material: new C.PolylineGlowMaterialProperty({glowPower: .3, color: GOLD})}});
+      flyToBbox(turf.bbox(turf.lineString(o.line)), -55);
+    } else {
+      dsSel.entities.add({position: C.Cartesian3.fromDegrees(o.pt[0], o.pt[1]), ellipse: {semiMajorAxis: 900, semiMinorAxis: 900, material: GOLD.withAlpha(.4)}});
+      camera.flyTo({destination: C.Cartesian3.fromDegrees(o.pt[0], o.pt[1] - .12, 12000), orientation: {heading: 0, pitch: C.Math.toRadians(-40), roll: 0}, duration: 2.2});
+    }
+    pushHist(ref, name);
+  }
+  const at = o.pt || (o.line && o.line[Math.floor(o.line.length / 2)]);
+  const d = at ? districtOf(at[0], at[1]) : null;
+  setCrumbs([{t: 'Якутия'}, {t: T.n}, {t: name, ref}]);
+  const t = o.tags, facts = [];
+  facts.push(fact('Тип', esc(themeKind(o)) || TBD));
+  facts.push(fact('Улус / округ', d ? esc(nm(d.tags)) : TBD, 'по границам OSM'));
+  if (o.line) facts.push(fact('Длина участка', fmt(turf.length(turf.lineString(o.line)), 1) + ' км', 'по геометрии OSM'));
+  if (o.geometry) facts.push(fact('Площадь', fmt(turf.area(o.geometry) / 1e6, 1) + ' км²', 'вычислено по границе OSM'));
+  if (at) facts.push(fact('Координаты', coord(at[0], at[1]), o.pt ? '' : 'середина линии', true));
+  for (const [key, label] of Object.entries(TAGL)) {
+    if (t[key] == null || key === 'ele' && k !== 'peaks' && k !== 'airports') continue;
+    let v = esc(vt(t[key]));
+    if (key === 'website') v = `<a style="color:var(--ice)" href="${esc(t[key])}" target="_blank">${esc(t[key].replace(/^https?:\/\//, ''))}</a>`;
+    facts.push(fact(label, v, 'OSM', /description|website|official_name/.test(key)));
+  }
+  const seasonal = k === 'winter' || t.winter_road === 'yes' || t.ice_road === 'yes' || t.seasonal === 'winter';
+  const osmType = {n: 'node', w: 'way', r: 'relation'}[id[0]];
+  showPanel(`
+    <div class="kick">${esc(T.n)}</div><div class="pt">${esc(name)}</div>
+    ${t['name:sah'] && S.lang !== 'sah' ? `<div class="alt">${esc(t['name:sah'])} <span class="muted">· саха тыла (OSM)</span></div>` : ''}
+    <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">${favBtn(ref, name)}${k === 'ridges' ? '<button class="btn" id="thFly">✈ Пролёт вдоль хребта</button>' : ''}${k === 'peaks' ? '<button class="btn" id="thFly">✈ Облёт вершины</button>' : ''}</div>
+    <div class="facts">${facts.join('')}</div>
+    ${seasonal ? `<div class="note">Сезонная дорога: работает только зимой. Даты открытия и закрытия зимников ежегодно объявляет региональный дорожный орган, в атлас они пока не подключены — ${TBD}.</div>` : ''}
+    <div id="wdBox"></div><div id="wikiBox" class="txt muted"></div>
+    <div class="src">Источник: <a href="https://www.openstreetmap.org/${osmType}/${id.slice(1)}" target="_blank">OpenStreetMap, ${osmType} ${id.slice(1)}</a> (ODbL), данные загружены ${new Date(S.thDate[k]).toLocaleDateString('ru-RU')}. Полнота слоя зависит от разметки OSM.</div>`);
+  wirePanel();
+  if ($('#thFly')) $('#thFly').onclick = () => k === 'ridges' ? flyRidge(o, name) : orbitPeak(o, name);
+  if (t.wikidata || t.wikipedia) enrich(t.wikidata, t.wikipedia, 'generic', ref);
+  else $('#wikiBox').innerHTML = '';
+}
+/* ---------- 5c. Время и космос (NASA GIBS) ---------- */
+/* Реальные спутниковые и климатические данные NASA GIBS (EOSDIS), без ключа:
+   — ежедневный снимок MODIS Terra в истинных цветах (с 2000 г.) — времена года и «Якутия во времени»;
+   — среднемесячная температура воздуха у поверхности (реанализ MERRA-2, с 1980 г.);
+   — среднемесячный снежный покров (MODIS Terra). */
+const GIBS = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/';
+const GL = {
+  modis: {id: 'MODIS_Terra_CorrectedReflectance_TrueColor', tms: 'GoogleMapsCompatible_Level9', ext: 'jpg', max: 9, n: 'Снимок MODIS Terra'},
+  temp:  {id: 'MERRA2_2m_Air_Temperature_Monthly', tms: 'GoogleMapsCompatible_Level6', ext: 'png', max: 6, cm: 'MERRA2_2m_Air_Temperature_Monthly', n: 'Температура воздуха, среднемесячная (MERRA-2)'},
+  snow:  {id: 'MODIS_Terra_L3_Snow_Cover_Monthly_Average_Pct', tms: 'GoogleMapsCompatible_Level6', ext: 'png', max: 6, cm: 'MODIS_NDSI_Snow_Cover', unit: '%', n: 'Снежный покров, среднемесячный (MODIS Terra)'}
+};
+const LAST_YEAR = new Date().getFullYear() - 1;
+const SEASONS = [['Зима', '03-25', 'конец марта: полный снежный покров, солнце уже высоко'], ['Весна', '05-28', 'конец мая: сход снега, ледоход'],
+                 ['Лето', '07-20', 'июль: тайга и тундра в зелени'], ['Осень', '09-25', 'конец сентября: жёлтая лиственница, первый снег на севере']];
+S.st = LS.get('st', {}); S.stLayers = {};
+const isoDay = d => d.toISOString().slice(0, 10);
+const ruDate = s => s ? new Date(s + 'T00:00:00Z').toLocaleDateString('ru-RU', {day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC'}) : '';
+const ruMonth = s => s ? new Date(s + 'T00:00:00Z').toLocaleDateString('ru-RU', {month: 'long', year: 'numeric', timeZone: 'UTC'}) : '';
+function gibsLayer(k, date, split) {
+  const g = GL[k];
+  const l = new C.ImageryLayer(new C.UrlTemplateImageryProvider({url: `${GIBS}${g.id}/default/${date}/${g.tms}/{z}/{y}/{x}.${g.ext}`, maximumLevel: g.max,
+    credit: 'NASA GIBS / EOSDIS: ' + g.id + ' (' + date + ')'}));
+  if (split) l.splitDirection = split;
+  if (k !== 'modis') l.alpha = .7;
+  return l;
+}
+function applyOverlays() {
+  const L = viewer.imageryLayers;
+  for (const k in S.stLayers) if (S.stLayers[k] && L.contains(S.stLayers[k])) L.remove(S.stLayers[k], true);
+  S.stLayers = {};
+  const add = (key, l) => { L.add(l); S.stLayers[key] = l; };
+  const cmp = S.st.modis && S.st.modisB;
+  if (S.st.modis) add('modis', gibsLayer('modis', S.st.modis, cmp ? C.SplitDirection.LEFT : undefined));
+  if (cmp) add('modisB', gibsLayer('modis', S.st.modisB, C.SplitDirection.RIGHT));
+  if (S.st.temp) add('temp', gibsLayer('temp', S.st.temp));
+  if (S.st.snow) add('snow', gibsLayer('snow', S.st.snow));
+  $('#split').classList.toggle('hidden', !cmp);
+  if (cmp) { $('#splitL').textContent = '◀ ' + ruDate(S.st.modis); $('#splitR').textContent = ruDate(S.st.modisB) + ' ▶'; placeSplit(); }
+  const parts = [];
+  if (S.st.modis && !cmp) parts.push('Снимок MODIS · ' + ruDate(S.st.modis) + ' · облака настоящие');
+  if (cmp) parts.push('Сравнение снимков MODIS: ' + ruDate(S.st.modis) + ' ↔ ' + ruDate(S.st.modisB));
+  if (S.st.temp) parts.push('Температура · ' + ruMonth(S.st.temp));
+  if (S.st.snow) parts.push('Снежный покров · ' + ruMonth(S.st.snow));
+  $('#stBadge').textContent = parts.join('   |   ');
+  $('#stBadge').classList.toggle('hidden', !parts.length);
+  $('#legend').style.bottom = (S.st.temp || S.st.snow) ? '' : '';
+  LS.set('st', S.st);
+}
+function setSt(key, val) { if (val) S.st[key] = val; else delete S.st[key]; if (key === 'modis' && !val) delete S.st.modisB; applyOverlays(); if (S.leftPanel === 'time' && !$('#left').classList.contains('hidden')) openLeft('time'); }
+function placeSplit() { const x = (scene.splitPosition || .5) * window.innerWidth; $('#split').style.left = x + 'px'; }
+(() => {
+  scene.splitPosition = .5;
+  const hd = document.querySelector('#split .hd'); let drag = false;
+  hd.addEventListener('pointerdown', e => { drag = true; hd.setPointerCapture(e.pointerId); });
+  hd.addEventListener('pointermove', e => { if (!drag) return; scene.splitPosition = Math.min(.95, Math.max(.05, e.clientX / window.innerWidth)); placeSplit(); });
+  hd.addEventListener('pointerup', () => { drag = false; });
+  window.addEventListener('resize', placeSplit);
+})();
+/* последние доступные месяцы и шкалы цветов — из описания сервиса GIBS */
+let gibsCaps = null;
+async function gibsInfo() {
+  if (gibsCaps) return gibsCaps;
+  gibsCaps = {};
+  try {
+    const x = await (await fetch(GIBS + '1.0.0/WMTSCapabilities.xml')).text();
+    const doc = new DOMParser().parseFromString(x, 'text/xml');
+    for (const L of doc.getElementsByTagName('Layer')) {
+      const id = L.getElementsByTagName('ows:Identifier')[0]?.textContent, k = Object.keys(GL).find(k => GL[k].id === id);
+      if (!k) continue;
+      const def = L.getElementsByTagName('Dimension')[0]?.getElementsByTagName('Default')[0]?.textContent;
+      const cm = [...L.getElementsByTagName('ows:Metadata')].map(m => m.getAttribute('xlink:href')).find(h => /colormaps\/v1\.3/.test(h || ''));
+      gibsCaps[k] = {def, cm};
+    }
+  } catch (e) { console.warn('GIBS capabilities', e); }
+  return gibsCaps;
+}
+async function gibsColormap(k) {
+  const g = GL[k]; if (g._cm) return g._cm;
+  const info = (await gibsInfo())[k] || {};
+  const t = await (await fetch(info.cm || `https://gibs.earthdata.nasa.gov/colormaps/v1.3/${g.cm}.xml`)).text();
+  const d = new DOMParser().parseFromString(t, 'text/xml');
+  const maps = [...d.getElementsByTagName('ColorMap')];
+  const cm = maps.find(m => m.getAttribute('units')) || maps.reduce((a, b) => b.getElementsByTagName('LegendEntry').length > a.getElementsByTagName('LegendEntry').length ? b : a);
+  const units = cm.getAttribute('units') || '', unit = units === 'K' ? '°C' : (units || g.unit || '');
+  const conv = v => units === 'K' ? v - 273.15 : v;
+  // rgb → значение: середина интервала из value="[a,b)"; для открытых границ — граница со знаком
+  const byRgb = new Map();
+  for (const e of cm.getElementsByTagName('ColorMapEntry')) {
+    if (e.getAttribute('transparent') === 'true') continue;
+    const m = /\[?\s*(-?INF|-?[\d.]+)\s*(?:,\s*(-?INF|\+?INF|-?[\d.]+))?/.exec(e.getAttribute('value') || e.getAttribute('sourceValue') || '');
+    if (!m) continue;
+    const lo = m[1], hi = m[2] ?? m[1];
+    let txt;
+    if (/INF/.test(lo)) txt = '< ' + Math.round(conv(+hi));
+    else if (/INF/.test(hi)) txt = '≥ ' + Math.round(conv(+lo));
+    else txt = String(Math.round(conv((+lo + +hi) / 2)));
+    byRgb.set(e.getAttribute('rgb'), txt + ' ' + unit);
+  }
+  const le = [...cm.getElementsByTagName('LegendEntry')];
+  const lab = e => { let s = e.getAttribute('tooltip') || ''; if (units === 'K') s = s.replace(/-?\d+(\.\d+)?/g, v => Math.round(+v - 273.15)); return s.replace('INF', '∞'); };
+  return g._cm = {byRgb, unit, le, lab};
+}
+async function gibsLegend(k) {
+  const g = GL[k]; if (g._leg) return g._leg;
+  try {
+    const {le, lab, unit} = await gibsColormap(k);
+    const ticks = [0, .25, .5, .75, 1].map(f => le[Math.min(le.length - 1, Math.round(f * (le.length - 1)))]);
+    g._leg = `<div style="height:10px;border-radius:5px;margin-top:6px;background:linear-gradient(90deg,${le.map(e => 'rgb(' + e.getAttribute('rgb') + ')').join(',')})"></div>
+      <div class="muted" style="display:flex;justify-content:space-between;font-size:11px;margin-top:2px">${ticks.map(e => `<span>${esc(lab(e).split(' – ')[0])}</span>`).join('')}</div>
+      <div class="muted" style="font-size:11px">${esc(unit)} · шкала NASA GIBS · точное значение под курсором — в нижней панели</div>`;
+  } catch (e) { g._leg = '<div class="muted" style="font-size:11px">Шкала цветов недоступна</div>'; }
+  return g._leg;
+}
+/* значение климатического слоя в точке: цвет пикселя тайла GIBS → значение по шкале */
+const gvTiles = new Map();
+async function gibsValueAt(k, date, lon, lat) {
+  const g = GL[k], z = Math.min(g.max, 5), n = 2 ** z, r = lat * Math.PI / 180;
+  if (Math.abs(lat) > 85) return null;
+  const fx = (lon + 180) / 360 * n, fy = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n, x = Math.floor(fx), y = Math.floor(fy);
+  const key = k + date + z + '/' + x + '/' + y;
+  if (!gvTiles.has(key)) {
+    gvTiles.set(key, new Promise(res => { const i = new Image(); i.crossOrigin = 'anonymous';
+      i.onload = () => { const c = document.createElement('canvas'); c.width = c.height = 256; const ctx = c.getContext('2d', {willReadFrequently: true}); ctx.drawImage(i, 0, 0); res(ctx.getImageData(0, 0, 256, 256).data); };
+      i.onerror = () => res(null); i.src = `${GIBS}${g.id}/default/${date}/${g.tms}/${z}/${y}/${x}.${g.ext}`; }));
+    if (gvTiles.size > 60) gvTiles.delete(gvTiles.keys().next().value);
+  }
+  const d = await gvTiles.get(key); if (!d) return null;
+  const o = (Math.min(255, Math.floor((fy - y) * 256)) * 256 + Math.min(255, Math.floor((fx - x) * 256))) * 4;
+  if (d[o + 3] === 0) return '—';
+  const cm = await gibsColormap(k);
+  return cm.byRgb.get(`${d[o]},${d[o + 1]},${d[o + 2]}`) || '—';
+}
+let gvBusy = false;
+async function updateGibsValue(c) {
+  const k = S.st.temp ? 'temp' : S.st.snow ? 'snow' : null;
+  $('#gvalW').style.display = k ? '' : 'none';
+  if (!k || gvBusy || !c) return;
+  gvBusy = true;
+  try {
+    const v = await gibsValueAt(k, S.st[k], C.Math.toDegrees(c.longitude), C.Math.toDegrees(c.latitude));
+    $('#gvalN').textContent = k === 'temp' ? 'Температура (' + ruMonth(S.st.temp) + ')' : 'Снег (' + ruMonth(S.st.snow) + ')';
+    $('#gval').textContent = v ?? '—';
+  } finally { gvBusy = false; }
+}
+/* ---------- 5d. Атмосферные эффекты (визуализация, не метеоданные) ---------- */
+/* Северное сияние: ПОЛОЖЕНИЕ и ЯРКОСТЬ — реальный краткосрочный прогноз NOAA SWPC OVATION (вероятность видимого
+   сияния по сетке 1°×1°); рисунок «занавесов» и цвета — художественная визуализация.
+   Облака и снегопад — чисто визуальные эффекты, не связаны с реальной погодой. */
+S.fx = Object.assign({aurora: false, clouds: false, snow: false}, LS.get('fx', {}));
+let aurora = null;
+const AURORA_SRC = 'https://services.swpc.noaa.gov/json/ovation_aurora_latest.json';
+async function loadOvation() {
+  const j = await fetchTimeout(AURORA_SRC, 20000);
+  const P = new Float32Array(360 * 181);
+  for (const [lon, lat, p] of j.coordinates) P[((lon % 360) + 360) % 360 * 181 + (lat + 90)] = p;
+  // для каждой долготы — широта максимума вероятности в северном полушарии (45–88° с.ш.)
+  const lat = [], val = [];
+  for (let lo = 0; lo < 360; lo++) {
+    let best = 0, bl = 67;
+    for (let la = 45; la <= 88; la++) { const p = P[lo * 181 + la + 90]; if (p > best) { best = p; bl = la; } }
+    lat.push(bl); val.push(best);
+  }
+  const sm = (a, w) => a.map((_, i) => { let s = 0; for (let k = -w; k <= w; k++) s += a[(i + k + 360) % 360]; return s / (2 * w + 1); });
+  const yak = j.coordinates.filter(c => c[0] >= 105 && c[0] <= 165 && c[1] >= 55 && c[1] <= 78);
+  return {lat: sm(lat, 6), val: sm(val, 3), obs: j['Observation Time'], fc: j['Forecast Time'], yakMax: Math.max(0, ...yak.map(c => c[2]))};
+}
+const AURORA_GLSL = `
+czm_material czm_getMaterial(czm_materialInput materialInput) {
+  czm_material material = czm_getDefaultMaterial(materialInput);
+  vec2 st = materialInput.st;
+  float inten = texture(image, vec2(st.s, 0.5)).r;
+  float x = st.s * 1100.0;
+  float rays = 0.55 + 0.45 * sin(x + time * 1.6 + sin(x * 0.11 + time * 0.35) * 3.0);
+  rays *= 0.55 + 0.45 * sin(x * 0.31 - time * 0.8);
+  float bottom = smoothstep(0.0, 0.07, st.t);
+  float top = 1.0 - smoothstep(0.2, 1.0, st.t);
+  vec3 col = mix(vec3(0.22, 1.0, 0.52), vec3(0.68, 0.32, 1.0), smoothstep(0.42, 0.95, st.t));
+  material.diffuse = col;
+  material.emission = col * 1.3;
+  material.alpha = clamp(inten * rays * bottom * top, 0.0, 0.85);
+  return material;
+}`;
+async function buildAurora() {
+  removeAurora();
+  let d, real = true;
+  try { d = await loadOvation(); }
+  catch (e) { real = false; d = {lat: Array(360).fill(67), val: Array(360).fill(25)}; toast('Прогноз NOAA недоступен — показана условная визуализация сияния', 'err'); }
+  if (!S.fx.aurora) return;
+  const pos = [], inten = [];
+  for (let lo = -180; lo <= 180; lo += 1) { const i = ((lo % 360) + 360) % 360; pos.push(C.Cartesian3.fromDegrees(lo, d.lat[i])); inten.push(Math.min(1, d.val[i] / 30)); }
+  // текстура интенсивности вдоль стены (параметр s ~ доля пройденной длины)
+  const cum = [0]; for (let i = 1; i < pos.length; i++) cum.push(cum[i - 1] + C.Cartesian3.distance(pos[i - 1], pos[i]));
+  const W = 1024, cv = document.createElement('canvas'); cv.width = W; cv.height = 1;
+  const g = cv.getContext('2d'), img = g.createImageData(W, 1);
+  for (let x = 0, k = 0; x < W; x++) {
+    const f = x / (W - 1) * cum[cum.length - 1];
+    while (k < cum.length - 2 && cum[k + 1] < f) k++;
+    const t = (f - cum[k]) / ((cum[k + 1] - cum[k]) || 1), v = inten[k] * (1 - t) + inten[k + 1] * t;
+    img.data[x * 4] = img.data[x * 4 + 1] = img.data[x * 4 + 2] = Math.round(v * 255); img.data[x * 4 + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const material = new C.Material({fabric: {type: 'SahaAurora', uniforms: {time: 0, image: cv}, source: AURORA_GLSL}, translucent: true});
+  const prim = new C.Primitive({
+    geometryInstances: new C.GeometryInstance({geometry: new C.WallGeometry({positions: pos, minimumHeights: pos.map(() => 95000), maximumHeights: pos.map(() => 320000)})}),
+    appearance: new C.MaterialAppearance({material, translucent: true, flat: true, faceForward: true,
+      renderState: {depthTest: {enabled: true}, depthMask: false, blending: C.BlendingState.ADDITIVE_BLEND, cull: {enabled: false}}}),
+    asynchronous: true
+  });
+  aurora = {prim, material, real, info: d};
+  scene.primitives.add(prim);
+  S.auroraInfo = real ? `прогноз NOAA OVATION на ${new Date(d.fc).toLocaleString('ru-RU', {day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit'})} · над Якутией вероятность до ${Math.round(d.yakMax)} %` : 'условная визуализация (прогноз недоступен)';
+  if (S.leftPanel === 'time' && !$('#left').classList.contains('hidden') && $('#auroraInfo')) $('#auroraInfo').textContent = S.auroraInfo;
+}
+function removeAurora() { if (aurora) { scene.primitives.remove(aurora.prim); aurora = null; } }
+let cloudsC = null, cloudsAt = null;
+function updateClouds(force) {
+  if (!S.fx.clouds) { if (cloudsC) { scene.primitives.remove(cloudsC); cloudsC = null; cloudsAt = null; } return; }
+  if (!cloudsC) cloudsC = scene.primitives.add(new C.CloudCollection({noiseDetail: 16}));
+  const c = camera.positionCartographic;
+  if (c.height > 450000) return;                                    // облака видны только при приближении
+  const p = [C.Math.toDegrees(c.longitude), C.Math.toDegrees(c.latitude)];
+  if (!force && cloudsAt && turf.distance(cloudsAt, p) < 50) return;
+  cloudsAt = p; cloudsC.removeAll();
+  const night = S.fx.aurora ? .55 : 1;
+  for (let i = 0; i < 200; i++) {
+    const q = turf.destination(p, 3 + Math.random() * 140, Math.random() * 360).geometry.coordinates;
+    const h = gh(q[0], q[1]) + 2500 + Math.random() * 3000;
+    cloudsC.add({position: C.Cartesian3.fromDegrees(q[0], q[1], h), scale: new C.Cartesian2(7000 + Math.random() * 9000, 2600 + Math.random() * 2600),
+      maximumSize: new C.Cartesian3(50, 12 + Math.random() * 7, 15), slice: .28 + Math.random() * .22, brightness: night});
+  }
+}
+const snow = {on: false, flakes: []};
+function snowLoop() {
+  if (!S.fx.snow) { $('#snowfx').style.display = 'none'; snow.on = false; return; }
+  const cv = $('#snowfx'), g = cv.getContext('2d'), W = cv.width = innerWidth, H = cv.height = innerHeight;
+  if (snow.flakes.length !== 320) snow.flakes = Array.from({length: 320}, () => ({x: Math.random() * W, y: Math.random() * H, r: .6 + Math.random() * 2.6, v: .4 + Math.random() * 1.3, ph: Math.random() * 6.3}));
+  g.clearRect(0, 0, W, H);
+  const t = performance.now() / 1000;
+  for (const f of snow.flakes) {
+    f.y += f.v * (.6 + f.r * .35); f.x += Math.sin(t * .8 + f.ph) * .45 + .25;
+    if (f.y > H + 5) { f.y = -5; f.x = Math.random() * W; } if (f.x > W + 5) f.x = -5;
+    g.globalAlpha = .45 + f.r * .18; g.beginPath(); g.arc(f.x, f.y, f.r, 0, 6.283); g.fillStyle = '#fff'; g.fill();
+  }
+  requestAnimationFrame(snowLoop);
+}
+function applyNight() {
+  // при сиянии делаем «ночь»: приглушаем подложку и небо
+  const dim = S.fx.aurora ? .42 : 1;
+  for (let i = 0; i < viewer.imageryLayers.length; i++) { const l = viewer.imageryLayers.get(i); if (!Object.values(S.stLayers || {}).includes(l)) l.brightness = dim; }
+  scene.skyAtmosphere.brightnessShift = S.fx.aurora ? -.55 : 0;
+  globe.atmosphereBrightnessShift = S.fx.aurora ? -.45 : 0;
+}
+function setFx(k, on) {
+  S.fx[k] = on; LS.set('fx', S.fx);
+  if (k === 'aurora') { if (on) buildAurora(); else { removeAurora(); S.auroraInfo = ''; } applyNight(); if (cloudsC) updateClouds(true); }
+  if (k === 'clouds') updateClouds(true);
+  if (k === 'snow' && on && !snow.on) { snow.on = true; $('#snowfx').style.display = ''; snowLoop(); }
+}
+setInterval(() => { if (S.fx.aurora) buildAurora(); }, 10 * 60 * 1000);   // прогноз NOAA обновляется каждые ~10 мин
+async function toggleLayer(key, on) {
+  S.layers[key] = on; LS.set('layers', S.layers);   // запоминаем сразу: панель может перерисоваться, пока слой грузится
+  try {
+    if (key === 'rivers') { if (on && !S.rivers) { toast('Загружаем реки (Natural Earth)…'); await loadRivers(); renderRivers(); buildIndex(); } dsR.show = on; }
+    if (key === 'lakes') { if (on && !S.lakes) { toast('Загружаем озёра (Natural Earth)…'); await loadLakes(); renderLakes(); buildIndex(); } dsL.show = on; }
+  } catch (e) { toast('Слой не загрузился: ' + esc(e.message), 'err'); }
+  if (key.startsWith('th_')) {
+    const k = key.slice(3), T = THEMES[k];
+    if (on && !S.th[k]) {
+      toast(`Загружаем слой «${esc(T.n)}» из OpenStreetMap…`);
+      try { await loadTheme(k); renderTheme(k); buildIndex(); toast(`«${esc(T.n)}»: ${fmt(S.th[k].length)} объектов`);
+        const sub = $('#ly_' + key) && $('#ly_' + key).parentElement.querySelector('small'); if (sub) sub.textContent = fmt(S.th[k].length) + ' объектов · ' + (T.sub || 'OpenStreetMap'); }
+      catch (e) {
+        on = false; S.layers[key] = false; const i = $('#ly_' + key); if (i) i.checked = false;
+        toast(`Слой «${esc(T.n)}» не загрузился: ${esc(e.message)}`, 'err', {label: 'Повторить', fn: () => toggleLayerUI(key, true)});
+      }
+    }
+    themeDS(k).show = on;
+  }
+  if (key === 'districts') dsD.show = on;
+  if (key === 'places') dsP.show = on;
+  if (key === 'naslegs') dsN.show = on;
+  if (key === 'republic') dsRep.show = on;
+  if (key === 'hillshade') { S.hillshade = on; setBase(S.base); }
+  if (key === 'hypso') setHypso(on);
+  S.layers[key] = on; LS.set('layers', S.layers);
+}
+S.layers = Object.assign({districts: true, places: true, rivers: false, lakes: false, naslegs: true, republic: true, hillshade: false, hypso: false},
+  Object.fromEntries(Object.keys(THEMES).map(k => ['th_' + k, false])), LS.get('layers', {}));
+
+/* ---------- 6. Selection & InfoPanels ---------- */
+function outline(geom, width = 4) { dsSel.entities.removeAll(); addRings(dsSel, geom, new C.PolylineGlowMaterialProperty({glowPower: .3, color: GOLD}), width); }
+function flyToBbox(b, pitch = -55, dur = 2.2) {
+  const pad = Math.max(b[2] - b[0], b[3] - b[1]) * .08;
+  const bs = C.BoundingSphere.fromRectangle3D(C.Rectangle.fromDegrees(b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad));
+  camera.flyToBoundingSphere(bs, {offset: new C.HeadingPitchRange(0, C.Math.toRadians(pitch), Math.max(bs.radius * 2.6, 4000)), duration: dur});
+}
+function setCrumbs(list) {
+  S.crumbs = list;
+  $('#crumbs').innerHTML = list.map((c, i) => i < list.length - 1 ? `<a data-i="${i}">${esc(c.t)}</a> <span class="muted">/</span>` : `<b>${esc(c.t)}</b>`).join(' ');
+  $('#crumbs').querySelectorAll('a').forEach(a => a.onclick = () => { const c = list[+a.dataset.i]; c.ref ? openObject(c.ref) : goHome(); });
+}
+function districtOf(lon, lat) { return S.districts.find(d => inBbox(lon, lat, d.bbox) && turf.booleanPointInPolygon([lon, lat], d.f)); }
+function showPanel(html) { $('#rb').innerHTML = html; $('#right').classList.remove('off'); document.body.classList.add('panel'); $('#rb').scrollTop = 0; }
+function closePanel() { $('#right').classList.add('off'); document.body.classList.remove('panel'); }
+function goHome() {
+  stopFlight(); S.sel = null; dsSel.entities.removeAll(); dsN.entities.removeAll(); paintDistricts(null); closePanel();
+  setCrumbs([{t: 'Республика Саха (Якутия)'}]); camera.flyTo({...HOME, duration: 2});
+}
+function favBtn(ref, name) {
+  const on = (LS.get('fav', [])).some(f => f.kind === ref.kind && f.id === ref.id);
+  return `<button class="btn" data-fav='${esc(JSON.stringify({...ref, name}))}'>${on ? '★ В избранном' : '☆ В избранное'}</button>`;
+}
+function wirePanel() {
+  $('#rb').querySelectorAll('[data-fav]').forEach(b => b.onclick = () => {
+    const o = JSON.parse(b.dataset.fav); let f = LS.get('fav', []);
+    const i = f.findIndex(x => x.kind === o.kind && x.id === o.id);
+    if (i >= 0) { f.splice(i, 1); b.textContent = '☆ В избранное'; } else { f.unshift(o); b.textContent = '★ В избранном'; }
+    LS.set('fav', f);
+  });
+  $('#rb').querySelectorAll('[data-open]').forEach(b => b.onclick = () => openObject(JSON.parse(b.dataset.open)));
+}
+function pushHist(ref, name) {
+  let h = LS.get('hist', []).filter(x => !(x.kind === ref.kind && x.id === ref.id));
+  h.unshift({...ref, name, t: Date.now()}); LS.set('hist', h.slice(0, 30));
+}
+const fact = (b, v, i, w) => `<div class="fact${w ? ' w' : ''}"><b>${b}</b><span>${v}</span>${i ? `<i>${i}</i>` : ''}</div>`;
+const coord = (lon, lat) => `${lat.toFixed(4)}° с.ш., ${lon.toFixed(4)}° в.д.`;
+
+async function openObject(ref, silent) {
+  if (!ref) return;
+  if (ref.kind === 'district') return selectDistrict(S.byId.get(ref.id), silent);
+  if (ref.kind === 'nasleg') {
+    let n = S.naslegById.get(ref.id);
+    if (!n && ref.parent && S.byId.get(ref.parent)) { await loadNaslegs(S.byId.get(ref.parent)); n = S.naslegById.get(ref.id); }
+    return n && selectNasleg(n, silent);
+  }
+  if (ref.kind === 'place') return selectPlace(S.placeById.get(ref.id), silent);
+  if (ref.kind === 'river') { if (!S.rivers) await toggleLayerUI('rivers', true); return selectRiver(S.riverById.get(ref.id), silent); }
+  if (ref.kind === 'lake') { if (!S.lakes) await toggleLayerUI('lakes', true); return selectLake(S.lakeById.get(ref.id), silent); }
+  if (ref.kind === 'theme') { if (!S.th[ref.key]) await toggleLayerUI('th_' + ref.key, true); return selectTheme(ref.key, ref.id, silent); }
+  if (ref.kind === 'mark') { const m = LS.get('marks', []).find(x => x.id === ref.id); if (m) camera.flyTo({destination: C.Cartesian3.fromDegrees(m.lon, m.lat, 30000), duration: 1.6}); }
+}
+
+function selectDistrict(d, silent) {
+  if (!d) return;
+  const ref = {kind: 'district', id: d.id}; S.sel = ref;
+  if (!silent) { stopFlight(); paintDistricts(d.id); outline(d.geometry, 5); dsN.entities.removeAll(); flyToBbox(d.bbox); pushHist(ref, nm(d.tags)); }
+  setCrumbs([{t: 'Якутия'}, {t: nm(d.tags), ref}]);
+  const t = d.tags, isOkrug = /округ/i.test(t.name);
+  showPanel(`
+    <div class="kick">${isOkrug ? 'Городской округ' : 'Муниципальный район (улус)'}</div>
+    <div class="pt">${esc(nm(t))}</div>
+    ${t['name:sah'] && S.lang !== 'sah' ? `<div class="alt">${esc(t['name:sah'])} <span class="muted">· саха тыла (OSM)</span></div>` : ''}
+    <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">${favBtn(ref, nm(t))}<button class="btn" id="orbitBtn">✈ Облёт улуса</button></div>
+    <div class="tabs"><button class="tab on" data-t="ov">Обзор</button><button class="tab" data-t="nas">Наслеги</button><button class="tab" data-t="pl">Населённые пункты (${d.places.length})</button></div>
+    <div id="tabBody"></div>`);
+  const tabs = {
+    ov: () => `
+      <div class="facts">
+        ${fact('Административный центр', d.centre ? `<a style="color:var(--ice);cursor:pointer" data-open='${JSON.stringify({kind: 'place', id: d.centre.id})}'>${esc(nm(d.centre.tags))}</a>` : TBD, 'OSM, роль admin_centre')}
+        ${fact('Площадь', fmt(d.area) + ' км²', 'вычислено по геометрии OSM')}
+        ${fact('Население', t.population ? fmt(t.population) + ' чел.' : TBD, t.population ? 'OSM' + (t['population:date'] ? ', ' + esc(t['population:date']) : ', год не указан') : '')}
+        ${fact('Год образования', '<span id="wdIncept">' + TBD + '</span>', 'Wikidata')}
+        ${fact('Координаты (точка внутри)', coord(d.pt[0], d.pt[1]), '', true)}
+      </div>
+      <div id="wdBox"></div>
+      <div class="sec">Природа · Экономика · История · Культура</div>
+      <div class="note">Редакционные тексты по разделам ещё не подключены — ${TBD}. Ниже — вводная статья Википедии, если она связана с объектом в OSM/Wikidata.</div>
+      <div id="wikiBox" class="txt muted">Загрузка справки…</div>
+      <div class="src">Источники: границы и атрибуты — <a href="https://www.openstreetmap.org/relation/${d.id}" target="_blank">OpenStreetMap, relation ${d.id}</a> (ODbL)${t.wikidata ? `; <a href="https://www.wikidata.org/wiki/${esc(t.wikidata)}" target="_blank">Wikidata ${esc(t.wikidata)}</a> (CC0)` : ''}; справка — Википедия (CC BY-SA).</div>`,
+    nas: () => '<div class="muted" style="padding:10px 0">Загружаем границы наслегов из OSM…</div>',
+    pl: () => placeList(d.places)
+  };
+  const showTab = k => {
+    $('#rb').querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.t === k));
+    $('#tabBody').innerHTML = tabs[k](); wirePanel();
+    if (k === 'ov') enrich(t.wikidata, t.wikipedia, 'admin', ref);
+    if (k === 'nas') showNaslegTab(d, ref);
+  };
+  $('#rb').querySelectorAll('.tab').forEach(b => b.onclick = () => showTab(b.dataset.t));
+  $('#orbitBtn').onclick = () => startOrbit(d.bbox, 'Облёт: ' + nm(t));
+  showTab('ov');
+}
+function placeList(list) {
+  if (!list.length) return `<div class="muted" style="padding:10px 0">Населённые пункты в OSM не найдены — ${TBD}</div>`;
+  const ord = {city: 0, town: 1, village: 2, hamlet: 3};
+  return [...list].sort((a, b) => (ord[a.tags.place] - ord[b.tags.place]) || nm(a.tags).localeCompare(nm(b.tags), 'ru'))
+    .map(p => `<div class="item" data-open='${JSON.stringify({kind: 'place', id: p.id})}'><span>${esc(nm(p.tags))}${p.centre ? ' <span class="chip">центр</span>' : ''}</span><small>${PLACE_TYPE[p.tags.place] || ''}${p.tags.population ? ' · ' + fmt(p.tags.population) : ''}</small></div>`).join('');
+}
+async function showNaslegTab(d, ref) {
+  try {
+    const list = await loadNaslegs(d);
+    if (S.sel !== ref) return;
+    renderNaslegs(list); dsN.show = true;
+    $('#tabBody').innerHTML = list.length
+      ? `<div class="note">Границы наслегов (сельских поселений) — OpenStreetMap, admin_level=8. Полнота зависит от разметки OSM.</div>` +
+        list.map(n => `<div class="item" data-open='${JSON.stringify({kind: 'nasleg', id: n.id, parent: d.id})}'><span>${esc(nm(n.tags))}</span><small>${fmt(n.area)} км² · ${n.places.length} н.п.</small></div>`).join('')
+      : `<div class="note">Для этого улуса в OSM нет проверенных границ наслегов — ${TBD}.</div>`;
+    wirePanel();
+  } catch (e) {
+    if (S.sel !== ref) return;
+    $('#tabBody').innerHTML = `<div class="note">Не удалось загрузить наслеги: ${esc(e.message)}</div><button class="btn" id="nasRetry">Повторить</button>`;
+    $('#nasRetry').onclick = () => { $('#tabBody').innerHTML = '<div class="muted" style="padding:10px 0">Загружаем границы наслегов из OSM…</div>'; showNaslegTab(d, ref); };
+  }
+}
+function selectNasleg(n, silent) {
+  const d = S.byId.get(n.parent), ref = {kind: 'nasleg', id: n.id, parent: n.parent}; S.sel = ref;
+  if (!silent) { stopFlight(); paintDistricts(d.id); renderNaslegs(S.naslegs.get(d.id)); outline(n.geometry, 4); flyToBbox(n.bbox, -50); pushHist(ref, nm(n.tags)); }
+  setCrumbs([{t: 'Якутия'}, {t: nm(d.tags), ref: {kind: 'district', id: d.id}}, {t: nm(n.tags), ref}]);
+  const t = n.tags;
+  showPanel(`
+    <div class="kick">Наслег · ${esc(nm(d.tags))}</div>
+    <div class="pt">${esc(nm(t))}</div>
+    ${t['name:sah'] && S.lang !== 'sah' ? `<div class="alt">${esc(t['name:sah'])}</div>` : ''}
+    <div style="margin-top:10px">${favBtn(ref, nm(t))}</div>
+    <div class="facts">
+      ${fact('Площадь', fmt(n.area, 1) + ' км²', 'вычислено по геометрии OSM')}
+      ${fact('Население', t.population ? fmt(t.population) + ' чел.' : TBD, t.population ? 'OSM' + (t['population:date'] ? ', ' + esc(t['population:date']) : '') : '')}
+      ${fact('Населённых пунктов', n.places.length || TBD, 'по точкам OSM внутри границ')}
+      ${fact('Координаты', coord(n.pt[0], n.pt[1]))}
+    </div>
+    <div id="wdBox"></div>
+    <div class="sec">Состав</div>${placeList(n.places)}
+    <div class="sec">История · Природа · Инфраструктура · Образование · Культура</div>
+    <div class="note">${TBD} — нужны редакционные материалы (улусные администрации, музеи, статистика).</div>
+    <div id="wikiBox" class="txt muted"></div>
+    <div class="src">Источник: <a href="https://www.openstreetmap.org/relation/${n.id}" target="_blank">OpenStreetMap, relation ${n.id}</a> (ODbL).</div>`);
+  wirePanel(); enrich(t.wikidata, t.wikipedia, 'admin', ref);
+}
+function selectPlace(p, silent) {
+  if (!p) return;
+  const ref = {kind: 'place', id: p.id}; S.sel = ref; const d = S.byId.get(p.d);
+  if (!silent) {
+    stopFlight(); dsSel.entities.removeAll();
+    dsSel.entities.add({position: C.Cartesian3.fromDegrees(p.lon, p.lat), ellipse: {semiMajorAxis: 1500, semiMinorAxis: 1500, material: GOLD.withAlpha(.35), outline: false}});
+    if (d) paintDistricts(d.id);
+    camera.flyTo({destination: C.Cartesian3.fromDegrees(p.lon, p.lat - .22, 16000), orientation: {heading: 0, pitch: C.Math.toRadians(-40), roll: 0}, duration: 2.4});
+    pushHist(ref, nm(p.tags));
+  }
+  let nas = null;
+  if (d && S.naslegs.has(d.id)) nas = S.naslegs.get(d.id).find(n => n.places.includes(p));
+  setCrumbs([{t: 'Якутия'}, ...(d ? [{t: nm(d.tags), ref: {kind: 'district', id: d.id}}] : []), ...(nas ? [{t: nm(nas.tags), ref: {kind: 'nasleg', id: nas.id, parent: d.id}}] : []), {t: nm(p.tags), ref}]);
+  const t = p.tags;
+  showPanel(`
+    <div class="kick">${PLACE_TYPE[t.place] || 'Населённый пункт'}${p.centre ? ' · административный центр' : ''}</div>
+    <div class="pt">${esc(nm(t))}</div>
+    ${t['name:sah'] && S.lang !== 'sah' ? `<div class="alt">${esc(t['name:sah'])}</div>` : ''}
+    <div style="margin-top:10px">${favBtn(ref, nm(t))}</div>
+    <div class="facts">
+      ${fact('Улус / округ', d ? esc(nm(d.tags)) : TBD)}
+      ${fact('Население', t.population ? fmt(t.population) + ' чел.' : TBD, t.population ? 'OSM' + (t['population:date'] ? ', ' + esc(t['population:date']) : '') : '')}
+      ${fact('Координаты', coord(p.lon, p.lat), 'WGS84', true)}
+    </div>
+    <div id="wdBox"></div><div id="wikiBox" class="txt muted"></div>
+    <div class="src">Источник: <a href="https://www.openstreetmap.org/node/${p.id}" target="_blank">OpenStreetMap, node ${p.id}</a> (ODbL).</div>`);
+  wirePanel(); enrich(t.wikidata, t.wikipedia, 'admin', ref);
+}
+function selectRiver(r, silent) {
+  if (!r) return;
+  const ref = {kind: 'river', id: r.id}; S.sel = ref;
+  if (!silent) {
+    stopFlight(); dsSel.entities.removeAll(); paintDistricts(null);
+    r.lines.forEach(l => dsSel.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(l.flat()), width: 9, material: new C.PolylineGlowMaterialProperty({glowPower: .3, color: C.Color.fromCssColorString('#7ee8ff')}), clampToGround: true}}));
+    flyToBbox(turf.bbox({type: 'MultiLineString', coordinates: r.lines}), -60); pushHist(ref, r.name);
+  }
+  const through = S.districts.filter(d => r.lines.some(l => l.some((c, i) => i % 2 === 0 && inBbox(c[0], c[1], d.bbox) && turf.booleanPointInPolygon(c, d.f))));
+  const len = r.lines.reduce((s, l) => s + turf.length(turf.lineString(l)), 0);
+  setCrumbs([{t: 'Якутия'}, {t: 'Реки'}, {t: r.name, ref}]);
+  showPanel(`
+    <div class="kick">Река</div><div class="pt">${esc(r.name)}</div>
+    <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">${favBtn(ref, r.name)}<button class="btn" id="riverFly">✈ Пролёт вдоль русла</button></div>
+    <div class="facts">
+      ${fact('Длина', '<span id="wdLen">' + TBD + '</span>', 'Wikidata')}
+      ${fact('Длина отрисованного участка', fmt(len) + ' км', 'по геометрии Natural Earth (упрощённой)')}
+      ${fact('Протекает по', through.length ? through.map(d => esc(nm(d.tags))).join(', ') : TBD, 'пересечение с границами OSM', true)}
+    </div>
+    <div id="wdBox"></div><div id="wikiBox" class="txt muted"></div>
+    <div class="note">Глубина, расход и уровень воды не показываются: проверенный источник пока не подключён.</div>
+    <div class="src">Геометрия: Natural Earth (${esc(S.riversSrc || '')}, public domain)${r.qid ? `; <a href="https://www.wikidata.org/wiki/${esc(r.qid)}" target="_blank">Wikidata ${esc(r.qid)}</a>` : ''}.</div>`);
+  wirePanel();
+  $('#riverFly').onclick = () => { const l = r.lines.reduce((a, b) => b.length > a.length ? b : a, []); startPathFlight(l, 'Река ' + r.name); };
+  riverQid(r).then(q => {
+    if (S.sel !== ref) return;
+    if (q) { const src = $('#rb .src'); if (src && !/wikidata/i.test(src.innerHTML)) src.innerHTML += ` Wikidata: <a href="https://www.wikidata.org/wiki/${esc(q)}" target="_blank">${esc(q)}</a> (найдено по названию).`; }
+    enrich(q, q ? null : 'ru:' + r.name, 'river', ref);
+  });
+}
+function selectLake(l, silent) {
+  if (!l) return;
+  const ref = {kind: 'lake', id: l.id}; S.sel = ref;
+  if (!silent) { stopFlight(); paintDistricts(null); outline(l.geometry, 5); flyToBbox(l.bbox, -55); pushHist(ref, l.name); }
+  const d = districtOf(l.pt[0], l.pt[1]);
+  setCrumbs([{t: 'Якутия'}, {t: 'Озёра'}, {t: l.name, ref}]);
+  showPanel(`
+    <div class="kick">Озеро</div><div class="pt">${esc(l.name)}</div>
+    <div style="margin-top:10px">${favBtn(ref, l.name)}</div>
+    <div class="facts">
+      ${fact('Расположение', d ? esc(nm(d.tags)) : TBD, 'по границам OSM')}
+      ${fact('Площадь контура', fmt(l.area, 1) + ' км²', 'по геометрии Natural Earth')}
+      ${fact('Координаты', coord(l.pt[0], l.pt[1]), '', true)}
+    </div>
+    <div id="wdBox"></div><div id="wikiBox" class="txt muted"></div>
+    <div class="note">Происхождение и экологическое состояние: ${TBD}</div>
+    <div class="src">Геометрия: Natural Earth (${esc(S.lakesSrc || '')})${l.qid ? `; <a href="https://www.wikidata.org/wiki/${esc(l.qid)}" target="_blank">Wikidata ${esc(l.qid)}</a>` : ''}.</div>`);
+  wirePanel(); enrich(l.qid, null, 'lake', ref);
+}
+/* enrichment from Wikidata + Wikipedia (real sourced data only) */
+async function enrich(qid, wpTag, kind, ref) {
+  const box = () => S.sel === ref ? $('#wdBox') : null, wbox = () => S.sel === ref ? $('#wikiBox') : null;
+  let title = null, lang = 'ru';
+  if (wpTag) { const m = /^(\w+):(.+)$/.exec(wpTag); if (m) { lang = m[1]; title = m[2]; } }
+  try {
+    if (qid) {
+      const ents = await wd([qid]); const e = ents[qid];
+      if (e && !('missing' in e)) {
+        const refs = new Set();
+        ['P885', 'P403', 'P4614', 'P974', 'P36', 'P131'].forEach(p => claimAll(e, p).forEach(v => v.id && refs.add(v.id)));
+        let lab = {};
+        if (refs.size) { const le = await wd([...refs].slice(0, 50), 'labels'); for (const k in le) lab[k] = (le[k].labels && (le[k].labels.ru || le[k].labels.en) || {}).value || k; }
+        const L = v => esc(lab[v.id] || v.id);
+        const f = [];
+        const pop = claimBest(e, 'P1082'), ar = claimBest(e, 'P2046'), inc = claimBest(e, 'P571');
+        if (kind === 'admin') {
+          if (pop) f.push(fact('Население (Wikidata)', qty(pop.v) + ' чел.', pop.date ? 'на ' + pop.date + ' г.' : 'год не указан'));
+          if (ar) f.push(fact('Площадь (Wikidata)', qty(ar.v)));
+          if (inc && $('#wdIncept')) $('#wdIncept').textContent = inc.v.time.slice(1, 5);
+        }
+        if (kind === 'river') {
+          const len = claimBest(e, 'P2043'); if (len && $('#wdLen')) $('#wdLen').textContent = qty(len.v);
+          const src = claimAll(e, 'P885'), mouth = claimAll(e, 'P403'), bas = claimBest(e, 'P2053'), db = claimAll(e, 'P4614'), trib = claimAll(e, 'P974');
+          f.push(fact('Исток', src.length ? src.map(L).join(', ') : TBD), fact('Устье', mouth.length ? mouth.map(L).join(', ') : TBD));
+          f.push(fact('Площадь бассейна', bas ? qty(bas.v) : TBD), fact('Бассейн', db.length ? db.map(L).join(', ') : TBD));
+          f.push(fact('Притоки', trib.length ? trib.slice(0, 25).map(L).join(', ') + (trib.length > 25 ? '…' : '') : TBD, 'Wikidata', true));
+        }
+        if (kind === 'lake') {
+          const dep = claimBest(e, 'P4511'), el = claimBest(e, 'P2044');
+          if (ar) f.push(fact('Площадь (Wikidata)', qty(ar.v)));
+          f.push(fact('Глубина', dep ? qty(dep.v) : TBD, dep ? 'Wikidata' : ''));
+          if (el) f.push(fact('Высота над уровнем моря', qty(el.v)));
+        }
+        const coa = claimBest(e, 'P94'), flag = claimBest(e, 'P41'), img = claimBest(e, 'P18');
+        let emb = '';
+        if (coa) emb += `<figure><img src="${commons(coa.v)}" alt="" loading="lazy"><div>Герб</div></figure>`;
+        if (flag) emb += `<figure><img src="${commons(flag.v)}" alt="" loading="lazy"><div>Флаг</div></figure>`;
+        const sah = e.labels && e.labels.sah && e.labels.sah.value;
+        const b = box();
+        if (b) b.innerHTML = (sah && S.lang !== 'sah' ? `<div class="alt" style="margin:-6px 0 8px">${esc(sah)} <span class="muted">· саха тыла (Wikidata)</span></div>` : '') +
+          (f.length ? `<div class="facts" style="margin-top:0">${f.join('')}</div>` : '') + (emb ? `<div class="emb">${emb}</div>` : '') +
+          (img && !emb ? '' : '');
+        if (e.sitelinks) {
+          if (e.sitelinks.ruwiki) { title = e.sitelinks.ruwiki.title; lang = 'ru'; }
+          else if (!title && e.sitelinks.enwiki) { title = e.sitelinks.enwiki.title; lang = 'en'; }
+          if (e.sitelinks.sahwiki && b) b.innerHTML += `<div class="muted" style="font-size:12px">Статья на саха тыла: <a style="color:var(--ice)" target="_blank" href="https://sah.wikipedia.org/wiki/${encodeURIComponent(e.sitelinks.sahwiki.title)}">${esc(e.sitelinks.sahwiki.title)}</a></div>`;
+        }
+      }
+    }
+    const w = wbox(); if (!w) return;
+    if (!title) { w.innerHTML = '<span class="tbd">Справочная статья не связана с объектом — данные уточняются.</span>'; return; }
+    const s = await wikiSummary(title, lang); const w2 = wbox(); if (!w2) return;
+    w2.classList.remove('muted');
+    w2.innerHTML = (s.thumbnail ? `<img class="photo" src="${esc(s.originalimage && s.originalimage.width < 1600 ? s.originalimage.source : s.thumbnail.source)}" alt="">` : '') +
+      `<div>${esc(s.extract || '')}</div><div class="muted" style="font-size:12px;margin-top:6px">Википедия: <a style="color:var(--ice)" target="_blank" href="${esc(s.content_urls && s.content_urls.desktop.page)}">${esc(s.title)}</a> (CC BY-SA)</div>`;
+  } catch (err) {
+    const w = wbox(); if (w) w.innerHTML = '<span class="tbd">Справочные сервисы недоступны: ' + esc(err.message) + '</span>';
+  }
+}
+
+/* ---------- 7. SearchPanel ---------- */
+const norm = s => String(s || '').toLowerCase().replace(/ё/g, 'е');
+function buildIndex() {
+  const ix = [];
+  S.districts.forEach(d => ix.push({n: nm(d.tags), a: [d.tags.name, d.tags['name:sah'], d.tags['name:en']], k: 'Улус / округ', ref: {kind: 'district', id: d.id}, w: 5}));
+  S.naslegById.forEach(n => ix.push({n: nm(n.tags), a: [n.tags.name, n.tags['name:sah']], k: 'Наслег · ' + nm(S.byId.get(n.parent).tags), ref: {kind: 'nasleg', id: n.id, parent: n.parent}, w: 3}));
+  const pw = {city: 4.5, town: 4, village: 2, hamlet: 1};
+  S.places.forEach(p => ix.push({n: nm(p.tags), a: [p.tags.name, p.tags['name:sah'], p.tags['name:en']], k: (PLACE_TYPE[p.tags.place] || '') + (p.d ? ' · ' + nm(S.byId.get(p.d).tags) : ''), ref: {kind: 'place', id: p.id}, w: pw[p.tags.place] || 1}));
+  (S.rivers || []).forEach(r => ix.push({n: r.name, a: [r.name_en], k: 'Река', ref: {kind: 'river', id: r.id}, w: 4.2}));
+  (S.lakes || []).forEach(l => ix.push({n: l.name, a: [], k: 'Озеро · ' + fmt(l.area) + ' км²', ref: {kind: 'lake', id: l.id}, w: 3.5}));
+  for (const k in S.th) S.th[k].forEach(o => { const n = nm(o.tags); if (n) ix.push({n, a: [o.tags.name, o.tags['name:sah'], o.tags.official_name, o.tags.iata, o.tags.icao], k: THEMES[k].n, ref: {kind: 'theme', key: k, id: o.id}, w: k === 'peaks' || k === 'airports' || k === 'oopt' ? 3.8 : 2.5}); });
+  ix.forEach(o => { o.s = [o.n, ...o.a].filter(Boolean).map(norm); });
+  S.index = ix;
+}
+function doSearch(q) {
+  q = norm(q.trim()); if (!q) return [];
+  const m = /^\s*(-?\d{1,2}(?:[.,]\d+)?)\s*[,; ]\s*(-?\d{1,3}(?:[.,]\d+)?)\s*$/.exec(q);
+  const res = [];
+  if (m) { const lat = parseFloat(m[1].replace(',', '.')), lon = parseFloat(m[2].replace(',', '.')); if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) res.push({n: `${lat}, ${lon}`, k: 'Координаты WGS84', coord: [lon, lat]}); }
+  for (const o of S.index) {
+    let sc = 0;
+    for (const s of o.s) { if (s === q) sc = Math.max(sc, 3); else if (s.startsWith(q)) sc = Math.max(sc, 2); else if (s.includes(q)) sc = Math.max(sc, 1); }
+    if (sc) res.push({...o, sc: sc * 10 + o.w});
+  }
+  return res.sort((a, b) => (b.sc || 99) - (a.sc || 99)).slice(0, 14);
+}
+let sugg = [], suggI = -1;
+function renderSugg() {
+  const box = $('#sugg');
+  if (!sugg.length) { box.classList.add('hidden'); return; }
+  box.innerHTML = sugg.map((s, i) => `<div class="sg${i === suggI ? ' act' : ''}" data-i="${i}"><span>${esc(s.n)}</span><span class="k">${esc(s.k)}</span></div>`).join('');
+  box.classList.remove('hidden');
+  box.querySelectorAll('.sg').forEach(el => el.onmousedown = ev => { ev.preventDefault(); pickSugg(sugg[+el.dataset.i]); });
+}
+function pickSugg(s) {
+  if (!s) return; $('#sugg').classList.add('hidden'); $('#search').value = s.n; $('#search').blur();
+  if (s.coord) { addMark(s.coord[0], s.coord[1], 'Точка ' + s.n); camera.flyTo({destination: C.Cartesian3.fromDegrees(s.coord[0], s.coord[1], 40000), duration: 2}); return; }
+  openObject(s.ref);
+}
+
+/* ---------- 8. CameraController / VirtualFlight ---------- */
+const F = {active: false, paused: false, speed: 1, alt: 4000, mode: null};
+function startPathFlight(coords, title) {
+  if (!coords || coords.length < 2) return;
+  stopFlight(true);
+  F.path = coords; F.cum = [0];
+  for (let i = 1; i < coords.length; i++) F.cum.push(F.cum[i - 1] + turf.distance(coords[i - 1], coords[i]) * 1000);
+  F.total = F.cum[F.cum.length - 1]; F.s = 0; F.mode = 'path'; F.hd = null;
+  beginFlight(title, true);
+}
+function startOrbit(bbox, title) {
+  stopFlight(true);
+  F.bs = C.BoundingSphere.fromRectangle3D(C.Rectangle.fromDegrees(...bbox)); F.h = 0; F.mode = 'orbit';
+  beginFlight(title, false);
+}
+function flyRidge(o, name) {
+  F.alt = S.terrain ? 1800 : 4000; $('#fAlt').value = F.alt; $('#fAltV').textContent = F.alt + ' м';
+  startPathFlight(o.line, 'Хребет ' + name);
+}
+function orbitPeak(o, name) {
+  stopFlight(true);
+  const ele = +(o.tags.ele || 0) || 0, h = S.terrain ? Math.max(ele * (scene.verticalExaggeration || 1), gh(o.pt[0], o.pt[1])) : 0;
+  F.bs = new C.BoundingSphere(C.Cartesian3.fromDegrees(o.pt[0], o.pt[1], h), 5500); F.h = 0; F.mode = 'orbit';
+  beginFlight('Облёт: ' + name + (ele ? ' (' + ele + ' м)' : ''), false);
+}
+function beginFlight(title, alt) {
+  F.active = true; F.paused = false; closeLeft(); closePanel();   // карточки не закрывают обзор в полёте
+  scene.screenSpaceCameraController.enableInputs = false;
+  $('#ftTitle').textContent = title; $('#fPlay').textContent = '⏸ Пауза';
+  $('#fAltWrap').style.display = alt ? '' : 'none';
+  $('#flight').classList.remove('hidden');
+}
+function stopFlight(keep) {
+  if (!F.active) return;
+  F.active = false; camera.lookAtTransform(C.Matrix4.IDENTITY);
+  scene.screenSpaceCameraController.enableInputs = true;
+  if (!keep) $('#flight').classList.add('hidden');
+}
+function along(s) {
+  const cum = F.cum; s = Math.min(Math.max(s, 0), F.total);
+  let lo = 0, hi = cum.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cum[m] <= s) lo = m; else hi = m; }
+  const t = (s - cum[lo]) / ((cum[hi] - cum[lo]) || 1), a = F.path[lo], b = F.path[hi];
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+}
+const gh = (lon, lat) => (S.terrain && globe.getHeight(C.Cartographic.fromDegrees(lon, lat))) || 0;
+function flightTick(dt) {
+  if (!F.active || F.paused) return;
+  if (F.mode === 'orbit') {
+    F.h += dt * .12 * F.speed;
+    camera.lookAt(F.bs.center, new C.HeadingPitchRange(F.h, C.Math.toRadians(-38), F.bs.radius * 2.2));
+    return;
+  }
+  const v = Math.max(F.total / 80, 300) * F.speed;   // весь маршрут ≈ 80 с при 1×
+  F.s += v * dt;
+  if (F.s >= F.total) { F.s = F.total; F.paused = true; $('#fPlay').textContent = '▶ Сначала'; }
+  const look = Math.max(F.alt * 4, 8000);
+  const p = along(F.s), q = along(F.s + look), q2 = along(F.s + look * 2);
+  let br = C.Math.toRadians(turf.bearing(p, q.map((x, i) => x === p[i] ? x + 1e-6 : x)));
+  if (F.hd == null) F.hd = br;
+  let dh = C.Math.negativePiToPi(br - F.hd); F.hd += dh * Math.min(1, dt * 1.6);
+  // учитываем рельеф: камера не ниже максимума рельефа под собой и впереди
+  const ground = Math.max(gh(p[0], p[1]), gh(q[0], q[1]), gh(q2[0], q2[1]));
+  const h = ground + F.alt;
+  camera.setView({destination: C.Cartesian3.fromDegrees(p[0], p[1], h), orientation: {heading: F.hd, pitch: -Math.atan2(F.alt, look) - .05, roll: 0}});
+}
+function greedyTour(points) {
+  const left = [...points], out = [left.shift()];
+  while (left.length) { const last = out[out.length - 1]; let bi = 0, bd = Infinity; left.forEach((p, i) => { const d = turf.distance(last, p); if (d < bd) { bd = d; bi = i; } }); out.push(left.splice(bi, 1)[0]); }
+  return out;
+}
+
+/* ---------- 9. MeasurementTools ---------- */
+const M = {pts: []};
+function pickCarto(pos) {
+  const ray = camera.getPickRay(pos); if (!ray) return null;
+  const c3 = globe.pick(ray, scene) || camera.pickEllipsoid(pos);
+  return c3 ? C.Cartographic.fromCartesian(c3) : null;
+}
+const TOOL_HINT = {
+  distance: 'Кликайте точки маршрута. Правый клик — завершить.',
+  area: 'Обведите территорию кликами. Правый клик — замкнуть контур.',
+  profile: 'Проведите линию разреза (2+ точки). Правый клик — построить профиль.',
+  coords: 'Кликните по карте, чтобы узнать координаты и высоту.',
+  mark: 'Кликните, чтобы поставить метку.'
+};
+function setTool(t) {
+  clearMeasure(); S.tool = t;
+  if (!t) { $('#hint').classList.add('hidden'); return; }
+  $('#hint').innerHTML = `<b>${esc(TOOL_HINT[t])}</b><span id="mread" class="muted"></span><button class="btn" id="mdone">Готово</button><button class="btn" id="mcopy">Копировать GeoJSON</button><button class="btn" id="mclose">✕</button>`;
+  $('#hint').classList.remove('hidden');
+  $('#mdone').onclick = () => finishTool(); $('#mclose').onclick = () => setTool(null);
+  $('#mcopy').onclick = () => {
+    if (!M.pts.length) return;
+    const co = M.pts.map(c => [+C.Math.toDegrees(c.longitude).toFixed(6), +C.Math.toDegrees(c.latitude).toFixed(6)]);
+    const g = t === 'area' && co.length > 2 ? {type: 'Polygon', coordinates: [[...co, co[0]]]} : co.length === 1 ? {type: 'Point', coordinates: co[0]} : {type: 'LineString', coordinates: co};
+    navigator.clipboard.writeText(JSON.stringify({type: 'Feature', properties: {tool: t, source: 'САХА 3D'}, geometry: g})).then(() => toast('GeoJSON скопирован'), () => toast('Буфер обмена недоступен', 'err'));
+  };
+  closeLeft();
+}
+function clearMeasure() { M.pts = []; dsM.entities.removeAll(); $('#profile').classList.add('hidden'); }
+function toolClick(pos) {
+  const c = pickCarto(pos); if (!c) return;
+  if (S.tool === 'coords') {
+    const lon = C.Math.toDegrees(c.longitude), lat = C.Math.toDegrees(c.latitude), h = S.terrain ? globe.getHeight(c) : null;
+    dsM.entities.removeAll();
+    dsM.entities.add({position: C.Cartesian3.fromRadians(c.longitude, c.latitude), point: {pixelSize: 9, color: GOLD, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY}});
+    M.pts = [c];
+    $('#mread').innerHTML = `${lat.toFixed(5)}°, ${lon.toFixed(5)}° · ${dms(lat, 'С', 'Ю')} ${dms(lon, 'В', 'З')}${h != null ? ' · высота ≈ ' + fmt(h) + ' м' : ''}`;
+    return;
+  }
+  if (S.tool === 'mark') { addMark(C.Math.toDegrees(c.longitude), C.Math.toDegrees(c.latitude)); return; }
+  M.pts.push(c); redrawMeasure();
+}
+function dms(v, p, n) { const a = Math.abs(v), d = Math.floor(a), m = Math.floor((a - d) * 60), s = ((a - d) * 60 - m) * 60; return `${d}°${m}′${s.toFixed(0)}″${v >= 0 ? p : n}`; }
+function geoDist(a, b) { return new C.EllipsoidGeodesic(a, b).surfaceDistance; }
+function redrawMeasure() {
+  dsM.entities.removeAll();
+  const pos = M.pts.map(c => C.Cartesian3.fromRadians(c.longitude, c.latitude));
+  M.pts.forEach(c => dsM.entities.add({position: C.Cartesian3.fromRadians(c.longitude, c.latitude), point: {pixelSize: 8, color: GOLD, outlineColor: C.Color.BLACK, outlineWidth: 1, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY}}));
+  if (pos.length > 1) dsM.entities.add({polyline: {positions: S.tool === 'area' ? [...pos, pos[0]] : pos, width: 3, material: GOLD, clampToGround: true}});
+  if (S.tool === 'area' && pos.length > 2) dsM.entities.add({polygon: {hierarchy: pos, material: GOLD.withAlpha(.2)}});
+  const deg = M.pts.map(c => [C.Math.toDegrees(c.longitude), C.Math.toDegrees(c.latitude)]);
+  let txt = '';
+  if (S.tool === 'distance' || S.tool === 'profile') {
+    let d = 0, d3 = 0;
+    for (let i = 1; i < M.pts.length; i++) {
+      d += geoDist(M.pts[i - 1], M.pts[i]);
+      d3 += C.Cartesian3.distance(C.Cartesian3.fromRadians(M.pts[i - 1].longitude, M.pts[i - 1].latitude, M.pts[i - 1].height || 0), C.Cartesian3.fromRadians(M.pts[i].longitude, M.pts[i].latitude, M.pts[i].height || 0));
+    }
+    if (M.pts.length > 1) {
+      txt = `По поверхности эллипсоида: <b>${fmt(d / 1000, 2)} км</b> · прямое пространственное: ${fmt(d3 / 1000, 2)} км`;
+      const az = (turf.bearing(deg[0], deg[1]) + 360) % 360; txt += ` · азимут 1→2: ${az.toFixed(1)}°`;
+    }
+  }
+  if (S.tool === 'area' && deg.length > 2) {
+    const a = turf.area(turf.polygon([[...deg, deg[0]]])) / 1e6;
+    txt = `Площадь: <b>${fmt(a, a < 10 ? 3 : 1)} км²</b> · периметр ${fmt(turf.length(turf.lineString([...deg, deg[0]])), 2)} км`;
+  }
+  $('#mread').innerHTML = txt;
+}
+async function finishTool() {
+  if (S.tool !== 'profile') { if (S.tool === 'distance' || S.tool === 'area') toast('Измерение завершено. «Копировать GeoJSON» — экспорт.'); return; }
+  if (M.pts.length < 2) return toast('Нужно минимум 2 точки');
+  const box = $('#profile'); box.classList.remove('hidden');
+  if (!S.terrain) { box.innerHTML = '<b>Профиль рельефа</b><div class="note">Для профиля нужен 3D-рельеф. Включите его в ⚙ Настройках (вариант «Terrain Tiles» работает без ключа).</div>'; return; }
+  box.innerHTML = '<b>Профиль рельефа</b> <span class="muted">— считаем по DEM…</span>';
+  const line = turf.lineString(M.pts.map(c => [C.Math.toDegrees(c.longitude), C.Math.toDegrees(c.latitude)]));
+  const L = turf.length(line), N = 240, cs = [];
+  for (let i = 0; i <= N; i++) { const p = turf.along(line, L * i / N).geometry.coordinates; cs.push(C.Cartographic.fromDegrees(p[0], p[1])); }
+  try {
+    let hs;
+    if (S.terrainSrc === 'free') {
+      // ~150 м на пиксель на 62° с.ш. (уровень 11) — достаточно для разреза на десятки-сотни км
+      const raw = await terrariumHeights(cs.map(c => [C.Math.toDegrees(c.longitude), C.Math.toDegrees(c.latitude)]), L > 300 ? 10 : 11);
+      if (raw.every(v => v == null)) throw new Error('сервер высотных тайлов не ответил');
+      hs = raw.map((v, i) => v ?? raw[i - 1] ?? 0);
+    } else {
+      const r = await C.sampleTerrainMostDetailed(viewer.terrainProvider, cs);
+      hs = r.map(c => c.height || 0);
+    }
+    const mx = Math.max(...hs), mn = Math.min(...hs);
+    let surf = 0; for (let i = 1; i < hs.length; i++) surf += Math.hypot(L * 1000 / N, hs[i] - hs[i - 1]);
+    const W = 740, H = 160, y = h => H - 14 - (h - mn) / ((mx - mn) || 1) * (H - 34);
+    const pts = hs.map((h, i) => `${(i / N * W).toFixed(1)},${y(h).toFixed(1)}`).join(' ');
+    box.innerHTML = `<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><b>Профиль рельефа · 3D-разрез</b><span class="muted">длина ${fmt(L, 2)} км · по рельефу ${fmt(surf / 1000, 2)} км · min ${fmt(mn)} м · max ${fmt(mx)} м · <a style="color:var(--ice);cursor:pointer" onclick="this.closest('#profile').classList.add('hidden')">закрыть</a></span></div>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><defs><linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8c26a" stop-opacity=".7"/><stop offset="1" stop-color="#2dd4bf" stop-opacity=".05"/></linearGradient></defs>
+      <polygon points="0,${H} ${pts} ${W},${H}" fill="url(#pg)"/><polyline points="${pts}" fill="none" stroke="#e8c26a" stroke-width="2"/>
+      <text x="4" y="12" fill="#8ea3c2" font-size="11">${fmt(mx)} м</text><text x="4" y="${H - 2}" fill="#8ea3c2" font-size="11">${fmt(mn)} м</text></svg>
+      <div class="muted" style="font-size:11px">Источник высот: ${esc(TERRAIN_NAME[S.terrainSrc] || '')}. Вертикальный масштаб растянут.</div>`;
+  } catch (e) { box.innerHTML = '<div class="note">Не удалось получить высоты: ' + esc(e.message) + '</div>'; }
+}
+function addMark(lon, lat, name) {
+  const marks = LS.get('marks', []);
+  const m = {id: 'm' + Date.now(), lon: +lon.toFixed(6), lat: +lat.toFixed(6), name: name || 'Метка ' + (marks.length + 1), t: Date.now()};
+  marks.unshift(m); LS.set('marks', marks); renderMarks(); toast(`${esc(m.name)} сохранена`);
+}
+function renderMarks() {
+  dsU.entities.removeAll();
+  LS.get('marks', []).forEach(m => {
+    const e = dsU.entities.add({position: C.Cartesian3.fromDegrees(m.lon, m.lat),
+      point: {pixelSize: 10, color: C.Color.fromCssColorString('#f472b6'), outlineColor: C.Color.WHITE, outlineWidth: 2, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY},
+      label: {text: m.name, font: '600 12px Manrope', pixelOffset: new C.Cartesian2(0, -16), fillColor: C.Color.WHITE, outlineColor: C.Color.BLACK, outlineWidth: 3, style: C.LabelStyle.FILL_AND_OUTLINE, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY}});
+    e.saha = {kind: 'mark', id: m.id};
+  });
+}
+
+/* ---------- 10. UI wiring: left panels ---------- */
+function openLeft(p) {
+  S.leftPanel = p;
+  document.querySelectorAll('.nb').forEach(b => b.classList.toggle('on', b.dataset.p === p));
+  const T = {time: 'Время и космос', layers: 'Слои и карты', districts: 'Улусы и округа', flight: 'Путешествие', tools: 'Инструменты', saved: 'Сохранённое', edu: 'Школьный атлас'};
+  $('#lt').textContent = T[p]; $('#lb').innerHTML = LEFT[p](); $('#left').classList.remove('hidden');
+  (LEFT_WIRE[p] || (() => {}))();
+}
+function closeLeft() { $('#left').classList.add('hidden'); document.querySelectorAll('.nb').forEach(b => b.classList.remove('on')); }
+const sw = (k, label, dis, sub) => `<div class="row"><input type="checkbox" class="switch" id="ly_${k}" data-ly="${k}" ${S.layers[k] ? 'checked' : ''} ${dis ? 'disabled' : ''}><label for="ly_${k}">${label}${sub ? `<br><small class="muted">${sub}</small>` : ''}</label></div>`;
+const LEFT = {
+  time: () => {
+    const today = isoDay(new Date(Date.now() - 864e5)), cmp = !!(S.st.modis && S.st.modisB);
+    const swx = (id, on, label, sub) => `<div class="row"><input type="checkbox" class="switch" id="${id}" ${on ? 'checked' : ''}><label for="${id}">${label}${sub ? `<br><small class="muted">${sub}</small>` : ''}</label></div>`;
+    return `
+    <div class="sec">Спутниковый снимок на дату</div>
+    ${swx('stModis', S.st.modis, 'Реальный снимок MODIS Terra', 'истинные цвета, ~250 м/пиксель, каждый день с 2000 г.')}
+    <div style="display:flex;gap:6px;align-items:center"><button class="btn" id="dPrev">◀</button><input type="date" id="dModis" min="2000-02-24" max="${today}" value="${S.st.modis || LAST_YEAR + '-07-20'}" style="flex:1"><button class="btn" id="dNext">▶</button></div>
+    <div class="seg">${SEASONS.map(([n, md, h]) => `<button class="btn" data-season="${LAST_YEAR}-${md}" title="${h}">${n} ${LAST_YEAR}</button>`).join('')}</div>
+    <div class="note">Это настоящий снимок за выбранный день: облака и дым — реальные. Если территорию закрыли облака, сдвиньте дату на 1–3 дня кнопками ◀ ▶. В декабре–январе (полярная ночь) север республики на снимках тёмный.</div>
+    <div class="sec">Якутия во времени</div>
+    ${swx('stCmp', cmp, 'Сравнить две даты шторкой', 'слева — дата выше, справа — вторая дата')}
+    <input type="date" id="dModisB" min="2000-02-24" max="${today}" value="${S.st.modisB || '2005-07-20'}" style="width:100%" ${cmp ? '' : 'disabled'}>
+    <div class="seg"><button class="btn" data-cmp="2005-07-20|${LAST_YEAR}-07-20">Июль 2005 ↔ ${LAST_YEAR}</button><button class="btn" data-cmp="${LAST_YEAR}-03-25|${LAST_YEAR}-07-20">Зима ↔ лето</button></div>
+    <div class="sec">Климат</div>
+    ${swx('stTemp', S.st.temp, 'Температура воздуха у поверхности', 'среднемесячная, реанализ NASA MERRA-2, с 1980 г.')}
+    <input type="month" id="mTemp" min="1980-01" value="${(S.st.temp || '').slice(0, 7) || LAST_YEAR + '-01'}" style="width:100%">
+    <div class="seg"><button class="btn" data-tm="01">Январь</button><button class="btn" data-tm="04">Апрель</button><button class="btn" data-tm="07">Июль</button><button class="btn" data-tm="10">Октябрь</button></div>
+    <div id="legTemp"></div>
+    <div class="note">Реанализ MERRA-2 — ячейка ≈ 50 км. В морозных котловинах (Оймякон, Верхоянск) метеостанции показывают холоднее, чем среднее по ячейке.</div>
+    <div class="sec">Снежный покров</div>
+    ${swx('stSnow', S.st.snow, 'Снежный покров', 'среднемесячный, MODIS Terra (NDSI), с 2000 г.')}
+    <input type="month" id="mSnow" min="2000-03" value="${(S.st.snow || '').slice(0, 7) || LAST_YEAR + '-10'}" style="width:100%">
+    <div id="legSnow"></div>
+    <div class="note">Средняя за месяц доля поверхности, покрытой снегом (по безоблачным наблюдениям MODIS), %. Под курсором — значение в точке.</div>
+    <div class="sec">Атмосфера — визуальные эффекты</div>
+    <div class="note">Режим атмосферного путешествия. Облака и снегопад — визуализация, а не реальная погода.</div>
+    ${swx('fxAurora', S.fx.aurora, 'Северное сияние', 'положение и яркость — реальный прогноз NOAA OVATION; рисунок «занавесов» художественный')}
+    <div class="muted" id="auroraInfo" style="font-size:12px;margin:-2px 0 6px 44px">${esc(S.auroraInfo || '')}</div>
+    ${swx('fxClouds', S.fx.clouds, 'Объёмные облака', 'вокруг камеры, видны при высоте ниже ~450 км')}
+    ${swx('fxSnow', S.fx.snow, 'Снегопад', 'визуальный эффект')}
+    <div class="note">Совет: сияние эффектнее с низкой высоты под углом к северу или с орбиты; для настоящей ночи включите ⚙ → «День и ночь».</div>
+    <div class="note">Источник: NASA GIBS / EOSDIS (MODIS Terra, MERRA-2); прогноз сияния — NOAA SWPC OVATION. Данные открытые; дата каждого слоя показана вверху экрана. Вечная мерзлота, осадки и климатические зоны — следующий этап.</div>`;
+  },
+  layers: () => `
+    <div class="sec">Подложка</div>
+    <div class="grid2">${Object.entries(BASES).map(([k, b]) => `<button class="btn${k === S.base ? ' on' : ''}" data-base="${k}"${S.badBase.has(k) ? ' title="Сервер не отвечает из вашей сети" style="opacity:.45"' : ''}>${b.n}${S.badBase.has(k) ? ' ⚠' : ''}</button>`).join('')}</div>
+    ${S.badBase.size ? '<div class="note">⚠ — сервер подложки не отвечает из вашей сети (вероятно, региональная блокировка Esri). Используйте OpenStreetMap, CARTO или Natural Earth.</div>' : ''}
+    <div class="sec">Географические слои</div>
+    ${sw('republic', 'Граница республики')}
+    ${sw('districts', 'Улусы и городские округа', 0, 'OSM, admin_level 6')}
+    ${sw('naslegs', 'Наслеги выбранного улуса', 0, 'OSM, admin_level 8 — открываются во вкладке улуса')}
+    ${sw('places', 'Населённые пункты', 0, 'OSM: города, посёлки, сёла')}
+    ${sw('rivers', 'Реки', 0, 'Natural Earth 1:10 млн')}
+    ${sw('lakes', 'Озёра', 0, 'Natural Earth 1:10 млн')}
+    ${sw('hillshade', 'Отмывка рельефа', 0, 'Esri World Hillshade')}
+    ${sw('hypso', 'Цветовая шкала высот (гипсометрия)', !S.terrain, S.terrain ? 'по DEM: ' + TERRAIN_NAME[S.terrainSrc] : 'включите 3D-рельеф в ⚙ Настройках')}
+    <div class="note">3D-рельеф: ${S.terrain ? '<b style="color:var(--teal)">включён</b> — ' + TERRAIN_NAME[S.terrainSrc] : 'выключен — включите в ⚙ Настройках'}.</div>
+    ${[...new Set(Object.values(THEMES).map(T => T.g))].map(g => `<div class="sec">${g}</div>` + Object.entries(THEMES).filter(([, T]) => T.g === g).map(([k, T]) =>
+      sw('th_' + k, `<span style="color:${T.color}">${T.icon || '━'}</span> ${T.n}`, 0, (S.th[k] ? fmt(S.th[k].length) + ' объектов · ' : '') + (T.sub || 'OpenStreetMap'))).join('')).join('')}
+    <div class="note">Тематические слои загружаются из OpenStreetMap при первом включении (10–60 с) и кэшируются в браузере на 14 дней.</div>
+    <div class="sec">Следующий этап — нужны внешние источники</div>
+    <div>${['Климат', 'Вечная мерзлота', 'История и временная шкала', 'Полезные ископаемые', 'Плотность населения', 'Лесные пожары', 'Природные зоны'].map(x => `<span class="chip">${x}</span>`).join('')}</div>
+    <div class="note">Для этих карт в OSM нет данных: нужны Росгидромет / ERA5, научные карты мерзлоты, Росстат, NASA FIRMS (см. README).</div>`,
+  districts: () => `
+    <input id="dFilter" placeholder="Фильтр по названию" style="width:100%;margin-bottom:8px">
+    <select id="dSort" style="width:100%;margin-bottom:8px"><option value="name">По названию</option><option value="area">По площади</option><option value="pop">По населению (OSM)</option></select>
+    <div id="dList"></div>
+    <div class="note">${S.districts.length ? `${S.districts.length} территорий из OpenStreetMap. Площадь вычислена по геометрии.` : 'Данные ещё загружаются…'}</div>`,
+  flight: () => {
+    const sel = S.sel, towns = S.places.filter(p => p.tags.place === 'city' || p.tags.place === 'town' || p.centre).sort((a, b) => nm(a.tags).localeCompare(nm(b.tags), 'ru'));
+    const opts = towns.map(p => `<option value="${p.id}">${esc(nm(p.tags))}</option>`).join('');
+    const yak = towns.find(p => /Якутск/.test(p.tags.name));
+    return `
+    <div class="sec">Полёт над улусом</div>
+    <button class="btn" id="flOrbit" style="width:100%" ${sel && sel.kind === 'district' ? '' : 'disabled'}>${sel && sel.kind === 'district' ? 'Облёт: ' + esc(nm(S.byId.get(sel.id).tags)) : 'Сначала выберите улус на карте'}</button>
+    <div class="sec">Полёт вдоль реки</div>
+    <select id="flRiver" style="width:100%;margin-bottom:6px">${(S.rivers || []).map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('') || '<option value="">— включите слой «Реки» —</option>'}</select>
+    <button class="btn" id="flRiverGo" style="width:100%" ${S.rivers ? '' : 'disabled'}>Лететь вдоль реки</button>
+    <div class="sec">Облёт горного хребта</div>
+    <select id="flRidge" style="width:100%;margin-bottom:6px">${S.th.ridges ? S.th.ridges.filter(o => nm(o.tags)).sort((a, b) => b.line.length - a.line.length).map(o => `<option value="${o.id}">${esc(nm(o.tags))}</option>`).join('') : '<option value="">— нажмите «Загрузить хребты» —</option>'}</select>
+    <button class="btn" id="flRidgeGo" style="width:100%">${S.th.ridges ? 'Лететь вдоль хребта' : 'Загрузить хребты из OSM'}</button>
+    <div class="sec">Перелёт между населёнными пунктами</div>
+    <select id="flA" style="width:100%;margin-bottom:6px">${opts}</select>
+    <select id="flB" style="width:100%;margin-bottom:6px">${opts}</select>
+    <button class="btn" id="flABGo" style="width:100%">Лететь</button>
+    <div class="sec">Обзор административных центров</div>
+    <button class="btn" id="flTour" style="width:100%">Маршрут через все центры улусов</button>
+    <div class="note">Камера держит заданную высоту над рельефом и заранее поднимается перед горами. Облёт отдельной вершины — кнопка в карточке вершины (слой «Вершины»).</div>` + (yak ? `<span hidden id="yakId">${yak.id}</span>` : '');
+  },
+  tools: () => `
+    ${[['distance', '📏 Расстояние и азимут'], ['area', '⬠ Площадь территории'], ['profile', '⛰ Профиль рельефа (3D-разрез)'], ['coords', '⌖ Координаты и высота точки'], ['mark', '📍 Поставить метку']].map(([k, n]) => `<button class="btn${S.tool === k ? ' on' : ''}" data-tool="${k}" style="width:100%;margin-bottom:6px;text-align:left">${n}</button>`).join('')}
+    <button class="btn" data-tool="" style="width:100%">Очистить измерения</button>
+    <div class="note">Расстояние считается по эллипсоиду WGS84 (геодезическое) и как прямое пространственное с учётом высот точек. Профиль даёт также длину по поверхности рельефа. Масштаб и компас — в нижней панели.</div>`,
+  saved: () => {
+    const f = LS.get('fav', []), h = LS.get('hist', []), m = LS.get('marks', []);
+    const it = o => `<div class="item" data-ref='${esc(JSON.stringify(o))}'><span>${esc(o.name)}</span><small>${(o.kind === 'theme' ? (THEMES[o.key] || {}).n : ({district: 'улус', nasleg: 'наслег', place: 'нас. пункт', river: 'река', lake: 'озеро', mark: 'метка'})[o.kind]) || ''}</small></div>`;
+    return `<div class="sec">Избранное</div>${f.map(it).join('') || '<div class="muted">Пусто — нажмите ☆ в карточке объекта</div>'}
+      <div class="sec">Мои метки</div>${m.map(x => it({kind: 'mark', id: x.id, name: x.name})).join('') || '<div class="muted">Нет меток</div>'}
+      ${m.length ? '<button class="btn" id="copyMarks" style="width:100%;margin-top:6px">Копировать метки (GeoJSON)</button><button class="btn" id="delMarks" style="width:100%;margin-top:6px">Удалить все метки</button>' : ''}
+      <div class="sec">История</div>${h.map(it).join('') || '<div class="muted">Пока пусто</div>'}
+      <div class="note">Хранится только в этом браузере.</div>`;
+  },
+  edu: () => `
+    <div class="sec">Географические викторины</div>
+    ${S.quiz.on ? '' : `<div class="txt" style="font-size:13px;margin-bottom:6px">Выберите задание — объект нужно найти на карте или выбрать ответ.</div>
+    <div class="grid2">${Object.entries(QUIZ).map(([k, q]) => `<button class="btn" data-quiz="${k}" style="text-align:left">${q.icon} ${q.n}</button>`).join('')}</div>`}
+    <div id="quizBox">${S.quiz.on && S.quiz.target != null ? quizHTML() : ''}</div>
+    <div class="note">Все задания строятся по реальным данным атласа: границы и центры — OpenStreetMap, реки — Natural Earth, вершины — OpenStreetMap с высотами.</div>
+    <div class="note">Режим исследователя: включайте слои, измеряйте и изучайте территорию — все инструменты доступны слева.</div>`
+};
+/* ---- Викторины школьного атласа ---- */
+/* слой, нужный викторине, включается на время задания и потом выключается, если был выключен */
+async function quizLayer(key) { if (!S.layers[key]) { (S.quizOn = S.quizOn || []).push(key); await toggleLayerUI(key, true); } }
+async function quizCleanup() { for (const k of S.quizOn || []) await toggleLayerUI(k, false); S.quizOn = []; }
+const shuffle = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const QUIZ = {
+  district: {n: 'Найди улус', icon: '🗺', q: t => `Найдите на карте: <b style="color:var(--gold)">${esc(nm(S.byId.get(t).tags))}</b>`,
+    prep: async () => { goHome(); return S.districts.map(d => d.id); }},
+  river: {n: 'Укажи реку', icon: '〰', q: t => `Найдите и нажмите реку: <b style="color:var(--gold)">${esc(S.riverById.get(t).name)}</b>`,
+    prep: async () => { await quizLayer('rivers'); if (!S.rivers) await toggleLayer('rivers', true);
+      goHome(); return (S.rivers || []).filter(r => !/протока/i.test(r.name) && (r.rank || 9) <= 7).map(r => r.id); }},
+  peak: {n: 'Найди вершину', icon: '▲', q: t => { const o = S.thById.peaks.get(t); return `Найдите вершину: <b style="color:var(--gold)">${esc(nm(o.tags))}</b> (${esc(o.tags.ele)} м)<br><span class="muted" style="font-size:12px">${esc(nm((districtOf(o.pt[0], o.pt[1]) || {tags: {}}).tags) || '')} — подсказка: ищите значок ▲</span>`; },
+    prep: async () => { await quizLayer('th_peaks');
+      return S.th.peaks ? S.th.peaks.filter(o => /[а-яё]/i.test(nm(o.tags) || '') && +o.tags.ele).sort((a, b) => +b.tags.ele - +a.tags.ele).slice(0, 25).map(o => o.id) : []; }},
+  centre: {n: 'Адм. центр', icon: '🏛', choice: true, q: t => `Какой населённый пункт — административный центр: <b style="color:var(--gold)">${esc(nm(S.byId.get(t).tags))}</b>?`,
+    prep: async () => S.districts.filter(d => d.centre).map(d => d.id)}
+};
+function quizHTML() {
+  const Q = QUIZ[S.quiz.mode];
+  let opts = '';
+  if (Q.choice) {
+    const right = S.byId.get(S.quiz.target).centre;
+    const wrong = shuffle(S.districts.filter(d => d.centre && d.id !== S.quiz.target).map(d => d.centre)).slice(0, 3);
+    opts = `<div style="display:grid;gap:6px;margin:8px 0">${shuffle([right, ...wrong]).map(p => `<button class="btn" data-ans="${p.id}" style="text-align:left">${esc(nm(p.tags))}</button>`).join('')}</div>`;
+  }
+  return `<div class="muted" style="font-size:12px">${Q.icon} ${Q.n} · вопрос ${S.quiz.n + 1} · верно ${S.quiz.ok} из ${S.quiz.n}</div>
+    <div class="txt" style="margin:6px 0">${Q.q(S.quiz.target)}</div>${opts}
+    <div style="display:flex;gap:6px"><button class="btn" id="quizSkip">Пропустить</button><button class="btn" id="quizStop">Завершить</button></div>`;
+}
+function wireQuiz() {
+  const qb = $('#quizBox'); if (!qb) return;
+  qb.innerHTML = quizHTML();
+  $('#quizStop').onclick = quizStop;
+  $('#quizSkip').onclick = () => { S.quiz.n++; quizReveal(false); setTimeout(quizNext, 1600); };
+  qb.querySelectorAll('[data-ans]').forEach(b => b.onclick = () => {
+    const ok = +b.dataset.ans === S.byId.get(S.quiz.target).centre.id;
+    qb.querySelectorAll('[data-ans]').forEach(x => { x.disabled = true; if (+x.dataset.ans === S.byId.get(S.quiz.target).centre.id) x.classList.add('on'); });
+    quizResult(ok);
+  });
+}
+async function quizStart(mode) {
+  await quizCleanup();
+  const ids = await QUIZ[mode].prep();
+  if (!ids || ids.length < 4) return toast('Для этой викторины ещё не загрузились данные — попробуйте через минуту', 'err');
+  S.quiz = {on: true, mode, ok: 0, n: 0, pool: ids, used: []};
+  openLeft('edu'); quizNext();
+}
+function quizNext() {
+  if (!S.quiz.on) return;
+  let left = S.quiz.pool.filter(i => !S.quiz.used.includes(i)); if (!left.length) { S.quiz.used = []; left = S.quiz.pool; }
+  S.quiz.target = pick(left); S.quiz.used.push(S.quiz.target);
+  dsSel.entities.removeAll();
+  if (S.quiz.mode === 'centre') { const d = S.byId.get(S.quiz.target); paintDistricts(d.id); outline(d.geometry, 5); flyToBbox(d.bbox); }
+  else if (S.quiz.mode === 'district' || S.quiz.mode === 'river') { paintDistricts(null); }
+  wireQuiz();
+}
+function quizStop() { S.quiz.on = false; paintDistricts(null); dsSel.entities.removeAll(); quizCleanup(); openLeft('edu'); }
+/* показать правильный ответ на карте */
+function quizReveal(ok) {
+  const t = S.quiz.target, m = S.quiz.mode;
+  if (m === 'district') outline(S.byId.get(t).geometry, 5);
+  if (m === 'river') { dsSel.entities.removeAll(); const r = S.riverById.get(t); r.lines.forEach(l => dsSel.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(l.flat()), width: 9, clampToGround: true, material: new C.PolylineGlowMaterialProperty({glowPower: .3, color: GOLD})}})); if (!ok) flyToBbox(turf.bbox({type: 'MultiLineString', coordinates: r.lines}), -70, 1.6); }
+  if (m === 'peak') { const o = S.thById.peaks.get(t); dsSel.entities.removeAll(); dsSel.entities.add({position: C.Cartesian3.fromDegrees(o.pt[0], o.pt[1]), ellipse: {semiMajorAxis: 6000, semiMinorAxis: 6000, material: GOLD.withAlpha(.45)}});
+    if (!ok) camera.flyTo({destination: C.Cartesian3.fromDegrees(o.pt[0], o.pt[1] - .6, 60000), orientation: {heading: 0, pitch: C.Math.toRadians(-45), roll: 0}, duration: 1.6}); }
+}
+function quizResult(ok) {
+  S.quiz.n++; if (ok) S.quiz.ok++;
+  quizReveal(ok);
+  toast(ok ? '✓ Верно!' : '✗ Неверно — правильный ответ подсвечен на карте', ok ? '' : 'err');
+  setTimeout(quizNext, ok ? 900 : 2200);
+}
+/* ответ кликом по карте */
+function quizClick(s) {
+  const m = S.quiz.mode, t = S.quiz.target;
+  if (m === 'district' && s.kind === 'place' && S.placeById.get(s.id).d) s = {kind: 'district', id: S.placeById.get(s.id).d};   // село — внутри улуса
+  if (m === 'district' && s.kind === 'district') { const ok = s.id === t; if (!ok) toast(`✗ Это ${esc(nm(S.byId.get(s.id).tags))}`, 'err'); return quizResult(ok), true; }
+  if (m === 'river' && s.kind === 'river') { const ok = s.id === t; if (!ok) toast(`✗ Это река ${esc(S.riverById.get(s.id).name)}`, 'err'); return quizResult(ok), true; }
+  if (m === 'peak' && s.kind === 'theme' && s.key === 'peaks') { const ok = s.id === t; return quizResult(ok), true; }
+  return false;
+}
+const LEFT_WIRE = {
+  time: () => {
+    const shift = n => { const d = new Date($('#dModis').value + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); $('#dModis').value = isoDay(d); setSt('modis', $('#dModis').value); };
+    $('#stModis').onchange = e => setSt('modis', e.target.checked ? $('#dModis').value : null);
+    $('#dModis').onchange = e => { if ($('#stModis').checked) setSt('modis', e.target.value); };
+    $('#dPrev').onclick = () => shift(-1); $('#dNext').onclick = () => shift(1);
+    $('#lb').querySelectorAll('[data-season]').forEach(b => b.onclick = () => { $('#dModis').value = b.dataset.season; setSt('modis', b.dataset.season); toast(b.title); });
+    $('#stCmp').onchange = e => { if (e.target.checked && !S.st.modis) S.st.modis = $('#dModis').value; setSt('modisB', e.target.checked ? $('#dModisB').value : null); };
+    $('#dModisB').onchange = e => { if (S.st.modisB) setSt('modisB', e.target.value); };
+    $('#lb').querySelectorAll('[data-cmp]').forEach(b => b.onclick = () => { const [a, c] = b.dataset.cmp.split('|'); S.st.modis = a; setSt('modisB', c); });
+    const month = id => $(id).value + '-01';
+    $('#stTemp').onchange = e => setSt('temp', e.target.checked ? month('#mTemp') : null);
+    $('#mTemp').onchange = () => { if ($('#stTemp').checked) setSt('temp', month('#mTemp')); };
+    $('#lb').querySelectorAll('[data-tm]').forEach(b => b.onclick = () => { $('#mTemp').value = $('#mTemp').value.slice(0, 4) + '-' + b.dataset.tm; setSt('temp', month('#mTemp')); });
+    $('#stSnow').onchange = e => setSt('snow', e.target.checked ? month('#mSnow') : null);
+    $('#mSnow').onchange = () => { if ($('#stSnow').checked) setSt('snow', month('#mSnow')); };
+    $('#fxAurora').onchange = e => setFx('aurora', e.target.checked);
+    $('#fxClouds').onchange = e => setFx('clouds', e.target.checked);
+    $('#fxSnow').onchange = e => setFx('snow', e.target.checked);
+    gibsLegend('temp').then(h => { if ($('#legTemp')) $('#legTemp').innerHTML = h; });
+    gibsLegend('snow').then(h => { if ($('#legSnow')) $('#legSnow').innerHTML = h; });
+    // ограничиваем выбор месяцев последними доступными данными
+    gibsInfo().then(i => { for (const [k, id] of [['temp', '#mTemp'], ['snow', '#mSnow']]) if (i[k] && i[k].def && $(id)) $(id).max = i[k].def.slice(0, 7); });
+  },
+  layers: () => {
+    $('#lb').querySelectorAll('[data-base]').forEach(b => b.onclick = () => { setBase(b.dataset.base); openLeft('layers'); });
+    $('#lb').querySelectorAll('[data-ly]').forEach(i => i.onchange = () => toggleLayer(i.dataset.ly, i.checked));
+  },
+  districts: () => {
+    const draw = () => {
+      const q = norm($('#dFilter').value), s = $('#dSort').value;
+      let l = S.districts.filter(d => norm(nm(d.tags)).includes(q) || norm(d.tags['name:sah']).includes(q));
+      if (s === 'area') l.sort((a, b) => b.area - a.area); if (s === 'pop') l.sort((a, b) => (+b.tags.population || 0) - (+a.tags.population || 0));
+      $('#dList').innerHTML = l.map(d => `<div class="item" data-id="${d.id}"><span>${esc(nm(d.tags))}</span><small>${fmt(d.area)} км²</small></div>`).join('');
+      $('#dList').querySelectorAll('.item').forEach(el => {
+        el.onclick = () => selectDistrict(S.byId.get(+el.dataset.id));
+        el.onmouseenter = () => hoverOutline(S.byId.get(+el.dataset.id));
+      });
+    };
+    $('#dFilter').oninput = draw; $('#dSort').onchange = draw; draw();
+  },
+  flight: () => {
+    const o = $('#flOrbit'); if (o) o.onclick = () => { const d = S.byId.get(S.sel.id); startOrbit(d.bbox, 'Облёт: ' + nm(d.tags)); };
+    $('#flRiverGo').onclick = () => { const r = S.riverById && S.riverById.get($('#flRiver').value); if (r) { const l = r.lines.reduce((a, b) => b.length > a.length ? b : a, []); startPathFlight(l, 'Река ' + r.name); } };
+    if ($('#yakId')) $('#flA').value = $('#yakId').textContent;
+    $('#flRidgeGo').onclick = async () => {
+      if (!S.th.ridges) { await toggleLayerUI('th_ridges', true); if (S.th.ridges) openLeft('flight'); return; }
+      const o = S.thById.ridges.get($('#flRidge').value); if (o) flyRidge(o, nm(o.tags));
+    };
+    $('#flABGo').onclick = () => {
+      const a = S.placeById.get(+$('#flA').value), b = S.placeById.get(+$('#flB').value);
+      if (!a || !b || a === b) return toast('Выберите два разных пункта');
+      const gc = turf.greatCircle([a.lon, a.lat], [b.lon, b.lat], {npoints: 120}).geometry;
+      startPathFlight(gc.type === 'LineString' ? gc.coordinates : gc.coordinates.flat(), `${nm(a.tags)} → ${nm(b.tags)}`);
+    };
+    $('#flTour').onclick = () => {
+      const pts = S.districts.filter(d => d.centre).map(d => [d.centre.lon, d.centre.lat]);
+      const yak = S.places.find(p => /^Якутск$/.test(p.tags.name)); if (yak) pts.unshift([yak.lon, yak.lat]);
+      if (pts.length < 2) return; const tour = greedyTour(pts); const path = [];
+      for (let i = 1; i < tour.length; i++) path.push(...turf.greatCircle(tour[i - 1], tour[i], {npoints: 20}).geometry.coordinates.slice(i > 1 ? 1 : 0));
+      F.alt = 12000; $('#fAlt').value = 12000; $('#fAltV').textContent = '12000 м';
+      startPathFlight(path, 'Обзор центров улусов');
+    };
+  },
+  tools: () => $('#lb').querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool || null)),
+  saved: () => {
+    $('#lb').querySelectorAll('[data-ref]').forEach(el => el.onclick = () => openObject(JSON.parse(el.dataset.ref)));
+    if ($('#copyMarks')) $('#copyMarks').onclick = () => navigator.clipboard.writeText(JSON.stringify({type: 'FeatureCollection', features: LS.get('marks', []).map(m => ({type: 'Feature', properties: {name: m.name}, geometry: {type: 'Point', coordinates: [m.lon, m.lat]}}))})).then(() => toast('Метки скопированы'), () => toast('Буфер обмена недоступен', 'err'));
+    if ($('#delMarks')) $('#delMarks').onclick = () => { LS.set('marks', []); renderMarks(); openLeft('saved'); };
+  },
+  edu: () => {
+    $('#lb').querySelectorAll('[data-quiz]').forEach(b => b.onclick = () => { if (!S.districts.length) return toast('Данные ещё загружаются'); quizStart(b.dataset.quiz); });
+    if (S.quiz.on && S.quiz.target != null) wireQuiz();
+  }
+};
+async function toggleLayerUI(k, on) { await toggleLayer(k, on); const i = $('#ly_' + k); if (i) i.checked = on; }
+
+/* hover */
+function hoverOutline(d) {
+  dsH.entities.removeAll();
+  if (d && (!S.sel || S.sel.id !== d.id)) addRings(dsH, d.geometry, GOLD.withAlpha(.9), 2.6);
+}
+function setHover(s, pos) {
+  const tip = $('#tip');
+  if (!s || s.kind === 'mark') { if (S.hover) { S.hover = null; dsH.entities.removeAll(); } tip.classList.add('hidden'); scene.canvas.style.cursor = ''; return; }
+  scene.canvas.style.cursor = 'pointer';
+  let html = '';
+  if (s.kind === 'district') { const d = S.byId.get(s.id); html = `<b>${esc(nm(d.tags))}</b>Центр: ${d.centre ? esc(nm(d.centre.tags)) : '—'}<br><span class="muted">${fmt(d.area)} км²${d.tags.population ? ' · ' + fmt(d.tags.population) + ' чел.' : ''}</span>`; }
+  if (s.kind === 'nasleg') { const n = S.naslegById.get(s.id); html = `<b>${esc(nm(n.tags))}</b><span class="muted">наслег · ${fmt(n.area)} км²</span>`; }
+  if (s.kind === 'place') { const p = S.placeById.get(s.id); html = `<b>${esc(nm(p.tags))}</b><span class="muted">${PLACE_TYPE[p.tags.place] || ''}${p.tags.population ? ' · ' + fmt(p.tags.population) + ' чел.' : ''}</span>`; }
+  if (s.kind === 'river') html = `<b>${esc(S.riverById.get(s.id).name)}</b><span class="muted">река · нажмите для карточки</span>`;
+  if (s.kind === 'theme') { const o = S.thById[s.key].get(s.id); html = `<b>${esc(nm(o.tags) || themeKind(o) || 'Без названия')}</b><span class="muted">${esc(THEMES[s.key].n)}${o.tags.ele && s.key === 'peaks' ? ' · ' + esc(o.tags.ele) + ' м' : ''}</span>`; }
+  if (s.kind === 'lake') { const l = S.lakeById.get(s.id); html = `<b>${esc(l.name)}</b><span class="muted">озеро · ${fmt(l.area, 1)} км²</span>`; }
+  tip.innerHTML = html; tip.style.left = pos.x + 'px'; tip.style.top = pos.y + 'px'; tip.classList.remove('hidden');
+  const key = s.kind + s.id;
+  if (S.hover !== key) {
+    S.hover = key;
+    if (s.kind === 'district') hoverOutline(S.byId.get(s.id));
+    else if (s.kind === 'theme') { dsH.entities.removeAll(); const o = S.thById[s.key].get(s.id); if (o.geometry) addRings(dsH, o.geometry, GOLD.withAlpha(.9), 2.2); }
+    else if (s.kind === 'nasleg') { dsH.entities.removeAll(); addRings(dsH, S.naslegById.get(s.id).geometry, GOLD.withAlpha(.9), 2.2); }
+    else dsH.entities.removeAll();
+  }
+}
+function pickSaha(pos) {
+  const arr = scene.drillPick(pos, 4);
+  const hit = arr.find(p => p.id && p.id.saha && p.id.saha.kind !== 'district') || arr.find(p => p.id && p.id.saha);
+  return hit ? hit.id.saha : null;
+}
+
+/* ---------- Intro journey ---------- */
+function fly(o) { return new Promise(res => { if (S.skip) return res(); camera.flyTo({...o, complete: res, cancel: res}); }); }
+let dataReady;
+async function journey() {
+  S.phase = 'flying'; $('#intro').style.opacity = 0; $('#intro').style.transform = 'scale(1.08)';
+  setTimeout(() => $('#intro').classList.add('hidden'), 900);
+  $('#skip').classList.remove('hidden');
+  const E = C.EasingFunction.QUADRATIC_IN_OUT;
+  await fly({destination: C.Cartesian3.fromDegrees(95, 45, 1.55e7), duration: 3.2, easingFunction: E});
+  await fly({destination: C.Cartesian3.fromDegrees(127, 49, 6.8e6), orientation: {heading: 0, pitch: C.Math.toRadians(-78), roll: 0}, duration: 3.2, easingFunction: E});
+  if (!S.skip) {
+    await dataReady;
+    dsRep.show = true;
+    const rt = $('#regionTitle'); rt.style.transition = 'opacity 1s'; rt.style.opacity = 1;
+    await sleep(2300); rt.style.opacity = 0;
+  }
+  await fly({...HOME, duration: 2.8, easingFunction: E});
+  enterMap();
+}
+function enterMap() {
+  if (S.phase === 'map') return;
+  S.phase = 'map'; $('#skip').classList.add('hidden'); $('#regionTitle').style.opacity = 0;
+  if (S.skip) { camera.cancelFlight(); camera.setView(HOME); }
+  $('#intro').classList.add('hidden');
+  document.body.classList.add('map');
+  Object.entries(S.layers).forEach(([k, v]) => { if (k !== 'hillshade') toggleLayer(k, v); });
+  setCrumbs([{t: 'Республика Саха (Якутия)'}]);
+}
+
+/* ---------- frame loop: rotation, flight, footer ---------- */
+let lastT = performance.now(), lastUI = 0;
+scene.preRender.addEventListener(() => {
+  const now = performance.now(), dt = Math.min(.1, (now - lastT) / 1000); lastT = now;
+  if (S.phase === 'intro' && now - S.userTouched > 5000) camera.rotate(C.Cartesian3.UNIT_Z, -dt * .06);
+  flightTick(dt);
+  if (aurora) aurora.material.uniforms.time = now / 1000;
+  if (S.fx.clouds && now - (S.cloudT || 0) > 1000) { S.cloudT = now; updateClouds(); }
+  if (!S.dayNight && scene.light instanceof C.DirectionalLight) C.Cartesian3.clone(camera.directionWC, scene.light.direction);
+  if (now - lastUI > 200 && S.phase === 'map') {
+    lastUI = now;
+    const h = camera.positionCartographic.height;
+    $('#camh').textContent = h > 10000 ? fmt(h / 1000) + ' км' : fmt(h) + ' м';
+    $('#needle').setAttribute('transform', `rotate(${-C.Math.toDegrees(camera.heading)} 20 20)`);
+    const cv = scene.canvas, cx = cv.clientWidth / 2, cy = cv.clientHeight / 2;
+    const a = pickCarto(new C.Cartesian2(cx - 50, cy)), b = pickCarto(new C.Cartesian2(cx + 50, cy));
+    $('#scale').textContent = a && b ? '100 px ≈ ' + (() => { const d = geoDist(a, b); return d > 2000 ? fmt(d / 1000, d > 20000 ? 0 : 1) + ' км' : fmt(d) + ' м'; })() : '—';
+  }
+});
+
+/* ---------- input handlers ---------- */
+const H = new C.ScreenSpaceEventHandler(scene.canvas);
+let mmT = 0;
+H.setInputAction(m => {
+  const now = performance.now(); if (now - mmT < 70) return; mmT = now;
+  const c = pickCarto(m.endPosition);
+  if (c) {
+    $('#cur').textContent = `${C.Math.toDegrees(c.latitude).toFixed(4)}°, ${C.Math.toDegrees(c.longitude).toFixed(4)}°`;
+    updateGibsValue(c);
+    $('#elev').textContent = S.terrain ? (globe.getHeight(c) != null ? fmt(globe.getHeight(c)) + ' м' : '—') : 'рельеф выключен';
+  }
+  if (S.phase !== 'map' || S.tool || F.active || S.quiz.on) { $('#tip').classList.add('hidden'); return; }   // в викторине подписи-подсказки скрыты
+  setHover(pickSaha(m.endPosition), m.endPosition);
+}, C.ScreenSpaceEventType.MOUSE_MOVE);
+H.setInputAction(c => {
+  if (S.phase !== 'map') return;
+  if (S.tool) { toolClick(c.position); return; }
+  const s = pickSaha(c.position); if (!s) return;
+  if (S.quiz.on) { if (S.quiz.mode === 'centre' || !quizClick(s)) toast(S.quiz.mode === 'centre' ? 'Выберите ответ в панели слева' : 'Нажмите на нужный объект на карте'); return; }
+  $('#tip').classList.add('hidden'); openObject(s);
+}, C.ScreenSpaceEventType.LEFT_CLICK);
+H.setInputAction(() => { if (S.tool) finishTool(); }, C.ScreenSpaceEventType.RIGHT_CLICK);
+['pointerdown', 'wheel', 'touchstart'].forEach(ev => scene.canvas.addEventListener(ev, () => { S.userTouched = performance.now(); }, {passive: true}));
+
+/* ---------- top bar / misc wiring ---------- */
+$('#baseSel').innerHTML = Object.entries(BASES).map(([k, b]) => `<option value="${k}">${b.n}</option>`).join('');
+$('#baseSel').onchange = e => setBase(e.target.value);
+$('#langSel').onchange = e => { S.lang = e.target.value; LS.set('lang', S.lang); refreshLabels(); };
+$('#dim').onclick = () => {
+  if (scene.mode === C.SceneMode.SCENE3D) { scene.morphTo2D(1.2); $('#dim').textContent = '3D'; }
+  else { scene.morphTo3D(1.2); $('#dim').textContent = '2D'; }
+};
+$('#logo').onclick = goHome; $('#back').onclick = goHome; $('#rx').onclick = () => { closePanel(); };
+$('#lx').onclick = closeLeft;
+document.querySelectorAll('.nb').forEach(b => b.onclick = () => b.classList.contains('on') ? closeLeft() : openLeft(b.dataset.p));
+$('#compass').onclick = () => camera.flyTo({destination: camera.positionWC.clone(), orientation: {heading: 0, pitch: camera.pitch, roll: 0}, duration: .8});
+$('#search').oninput = e => { sugg = doSearch(e.target.value); suggI = -1; renderSugg(); };
+$('#search').onkeydown = e => {
+  if (e.key === 'ArrowDown') { suggI = Math.min(sugg.length - 1, suggI + 1); renderSugg(); e.preventDefault(); }
+  if (e.key === 'ArrowUp') { suggI = Math.max(0, suggI - 1); renderSugg(); e.preventDefault(); }
+  if (e.key === 'Enter') pickSugg(sugg[Math.max(0, suggI)]);
+  if (e.key === 'Escape') $('#sugg').classList.add('hidden');
+};
+$('#search').onblur = () => setTimeout(() => $('#sugg').classList.add('hidden'), 150);
+$('#fPlay').onclick = () => {
+  if (F.mode === 'path' && F.s >= F.total) { F.s = 0; F.paused = false; } else F.paused = !F.paused;
+  $('#fPlay').textContent = F.paused ? '▶ Продолжить' : '⏸ Пауза';
+};
+$('#fSpeed').oninput = e => { F.speed = +e.target.value; $('#fSpeedV').textContent = F.speed + '×'; };
+$('#fAlt').oninput = e => { F.alt = +e.target.value; $('#fAltV').textContent = F.alt + ' м'; };
+$('#fStop').onclick = () => stopFlight();
+$('#fHome').onclick = () => { stopFlight(); goHome(); };
+$('#settingsBtn').onclick = () => {
+  const m = $('#modal');
+  m.innerHTML = `<div class="glass">
+    <div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">Настройки</h3><button class="x" id="mx">×</button></div>
+    <div class="sec">3D-рельеф</div>
+    ${['free', 'ion', 'none'].map(k => `<div class="row"><input type="radio" name="tsrc" id="ts_${k}" value="${k}" ${S.terrainSrc === k ? 'checked' : ''}><label for="ts_${k}">${{free: '<b>Terrain Tiles</b> — открытые данные, без ключа <br><small class="muted">SRTM / GMTED2010 / ETOPO1 (Mapzen, AWS Open Data)</small>', ion: '<b>Cesium World Terrain</b> — точнее, нужен бесплатный токен', none: 'Без рельефа (быстрее на слабых компьютерах)'}[k]}</label></div>`).join('')}
+    <div id="ionBox" style="${S.terrainSrc === 'ion' ? '' : 'display:none'}">
+      <div class="txt" style="font-size:13px">Токен: зарегистрируйтесь на <a style="color:var(--ice)" href="https://ion.cesium.com/signup" target="_blank">ion.cesium.com</a> → Access Tokens → скопируйте Default token.</div>
+      <div style="display:flex;gap:6px;margin-top:8px"><input id="ionTok" style="flex:1" placeholder="eyJhbGciOi…" value="${esc(LS.get('ion', ''))}"><button class="btn gold" id="ionApply">Подключить</button></div>
+    </div>
+    <div class="row"><label>Вертикальное преувеличение рельефа</label><input type="range" id="vex" min="1" max="5" step="0.5" value="${scene.verticalExaggeration || 1}"><span id="vexV">${scene.verticalExaggeration || 1}×</span></div>
+    <div class="sec">День и ночь</div>
+    <div class="row"><input type="checkbox" class="switch" id="dn" ${S.dayNight ? 'checked' : ''}><label for="dn">Освещение по реальному положению Солнца</label></div>
+    <div class="row"><label>Дата и время (UTC)</label><input type="datetime-local" id="dnt" value="${C.JulianDate.toIso8601(viewer.clock.currentTime).slice(0, 16)}"></div>
+    <div class="sec">Данные</div>
+    <button class="btn" id="clr">Очистить кэш геоданных и перезагрузить</button>
+    <div class="note">Геоданные: © участники OpenStreetMap (ODbL), Natural Earth (public domain), Wikidata (CC0), Википедия (CC BY-SA). Подложки: Esri, CARTO, OpenTopoMap, OSM.</div></div>`;
+  m.classList.remove('hidden');
+  $('#mx').onclick = () => m.classList.add('hidden');
+  m.onclick = e => { if (e.target === m) m.classList.add('hidden'); };
+  $('#ionApply').onclick = () => { const t = $('#ionTok').value.trim(); if (t) setTerrain('ion', t); };
+  document.querySelectorAll('input[name=tsrc]').forEach(r => r.onchange = () => {
+    $('#ionBox').style.display = r.value === 'ion' ? '' : 'none';
+    if (r.value !== 'ion') setTerrain(r.value);
+    else if (LS.get('ion', '')) setTerrain('ion', LS.get('ion', ''));
+  });
+  $('#vex').oninput = e => { scene.verticalExaggeration = +e.target.value; LS.set('vex', +e.target.value); $('#vexV').textContent = e.target.value + '×'; };
+  $('#dn').onchange = e => { S.dayNight = e.target.checked; applyLighting(); };
+  $('#dnt').onchange = e => { try { viewer.clock.currentTime = C.JulianDate.fromIso8601(e.target.value + ':00Z'); viewer.clock.shouldAnimate = false; } catch (x) {} };
+  $('#clr').onclick = () => { try { indexedDB.deleteDatabase('saha3d'); } catch (x) {} try { Object.keys(localStorage).filter(k => /^saha3d:(main|nas)_/.test(k)).forEach(k => localStorage.removeItem(k)); } catch (x) {} location.reload(); };
+};
+$('#start').onclick = () => journey();
+$('#skip').onclick = async () => { S.skip = true; camera.cancelFlight(); camera.setView(HOME); await dataReady; dsRep.show = S.layers.republic; enterMap(); };
+window.addEventListener('keydown', e => { if (e.key === 'Escape') { if (S.tool) setTool(null); else if (F.active) stopFlight(); } });
+
+/* ---------- boot ---------- */
+S.lang = LS.get('lang', 'ru'); $('#langSel').value = S.lang;
+setBase(S.base); renderMarks();
+for (const k of ['aurora', 'clouds', 'snow']) if (S.fx[k]) setFx(k, true);
+S.terrainSrc = 'none';
+scene.verticalExaggeration = LS.get('vex', 1.5);
+{ const src = LS.get('terrainSrc', 'free');                          // по умолчанию — открытый рельеф без ключа
+  if (src === 'ion' && LS.get('ion', '')) setTerrain('ion', LS.get('ion', ''), true);
+  else if (src === 'free') setTerrain('free', null, true); }
+function boot() {
+  const st = $('#introStatus');
+  dataReady = loadMain(m => { st.textContent = m; })
+    .then(data => { build(data); st.innerHTML = `✓ ${S.districts.length} районов и округов · ${fmt(S.places.length)} населённых пунктов · OpenStreetMap`; })
+    .catch(e => {
+      console.error(e);
+      if (/Failed to fetch|NetworkError|Load failed/i.test(e.message) && (IN_FRAME || location.protocol === 'blob:')) envBlocked('сетевые запросы заблокированы окружением (' + e.message + ')');
+      st.innerHTML = '<span style="color:var(--err)">Не удалось загрузить границы: ' + esc(e.message) + '</span>';
+      toast('Геоданные не загрузились: ' + esc(e.message), 'err', {label: 'Повторить', fn: boot});
+    });
+  return dataReady;
+}
+boot();
+window.SAHA = {viewer, S};
+/* Сборка снимка геоданных — запускается вручную на локальном сервере (start-saha3d.bat):
+   SAHA.exportSnapshot() — сохраняет все данные в папку data/ рядом с index.html */
+SAHA.exportSnapshot = async (log = console.log) => {
+  const save = async (path, obj) => { const r = await fetch('/__save/data/' + path, {method: 'POST', body: JSON.stringify(obj)}); if (!r.ok) throw new Error(path + ': HTTP ' + r.status); log('✓ data/' + path); };
+  const main = LS.get('main_v1') || await loadMain(() => {});
+  await save('main.json', main);
+  for (const d of S.districts) {
+    let tries = 0;
+    while (true) { try { await loadNaslegs(d); break; } catch (e) { if (++tries > 3) { log('✗ наслеги ' + d.tags.name + ': ' + e.message); break; } await sleep(5000); } }
+    const n = LS.get('nas_v1_' + d.id); if (n) await save('naslegs/' + d.id + '.json', n);
+  }
+  for (const k of Object.keys(THEMES)) {
+    try { await loadTheme(k); const c = await IDB.get('th_v1_' + k); if (c) await save('themes/' + k + '.json', {...c, snap: true}); }
+    catch (e) { log('✗ слой ' + k + ': ' + e.message); }
+  }
+  await loadRivers(); await save('rivers.json', {src: S.riversSrc, rivers: S.rivers.map(({ents, ...r}) => r)});
+  await loadLakes(); await save('lakes.json', {src: S.lakesSrc, lakes: S.lakes.map(({f, ...l}) => l)});
+  log('Готово'); return true;
+};   // для отладки из консоли
+</script>
+</body>
+</html>
