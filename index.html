@@ -580,7 +580,7 @@ async function render(x, y, z) {
   g.drawImage(bmp, 0, 0); const d = g.getImageData(0, 0, N, N).data;
   const H = new Float32Array(N * N);
   for (let i = 0; i < N * N; i++) H[i] = d[i * 4] * 256 + d[i * 4 + 1] + d[i * 4 + 2] / 256 - 32768;
-  if (z <= 9) {
+  {                                                                   // сглаживание шума DEM — одинаково на всех уровнях, чтобы стыки тайлов совпадали
     const T = H.slice();
     for (let r = 1; r < N - 1; r++) for (let q = 1; q < N - 1; q++) {
       const i = r * N + q;
@@ -687,11 +687,11 @@ function drawGrid() {
       style: C.LabelStyle.FILL_AND_OUTLINE, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, distanceDisplayCondition: new C.DistanceDisplayCondition(0, 4e6)}});
   for (let la = 52; la <= 78; la += 2) {
     dsGrid.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(Array.from({length: 41}, (_, i) => [96 + i * 2, la]).flat()), width: 1, material: col, arcType: C.ArcType.RHUMB}});
-    for (let lo = 104; lo <= 168; lo += 16) lab(la + '° с.ш.', lo, la + .15);
+    if (la % 4 === 0) for (let lo = 108; lo <= 164; lo += 28) lab(la + '° с.ш.', lo, la + .15);
   }
   for (let lo = 96; lo <= 176; lo += 4) {
     dsGrid.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray([lo, 50, lo, 80]), width: 1, material: col, arcType: C.ArcType.RHUMB}});
-    for (let la = 56; la <= 76; la += 6) lab(lo + '° в.д.', lo + .1, la + 1);
+    if (lo % 8 === 0) for (let la = 58; la <= 74; la += 8) lab(lo + '° в.д.', lo + .1, la + 1);
   }
 }
 function topoMode(on) {
