@@ -223,6 +223,7 @@ body.map #right.off{pointer-events:none}
   <div class="hideM" id="gvalW" style="display:none"><span id="gvalN"></span>: <span class="v" id="gval">—</span></div>
   <div>Камера: <span class="v" id="camh">—</span></div>
   <div id="scalebar" class="hideM"><i></i><span class="v" id="scale">—</span></div>
+  <div class="hideM" id="topoInfo" style="display:none">Сечение рельефа: <span class="v" id="topoStep">—</span></div>
   <div class="sp" style="flex:1"></div>
   <div class="hideM muted" id="dataDate"></div>
 </div>
@@ -384,7 +385,9 @@ const SPEC = {
   esriHs:   {url: ESRI('Elevation/World_Hillshade'), max: 16, credit: '© Esri'},
   voyager:  {url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', sub: 'abcd', max: 18, credit: '© OpenStreetMap contributors, © CARTO'},
   dark:     {url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', sub: 'abcd', max: 18, credit: '© OpenStreetMap contributors, © CARTO'},
-  topo:     {url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', sub: 'abc', max: 17, credit: '© OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)'},
+  otm:      {url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', sub: 'abc', max: 17, credit: '© OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)'},
+  topoRelief: {custom: true},   // своя топооснова: горизонтали, послойная окраска, отмывка — из DEM
+  labels:   {url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png', sub: 'abcd', max: 18, credit: '© OpenStreetMap contributors, © CARTO'},
   osm:      {url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', max: 19, credit: '© OpenStreetMap contributors'},
   ne:       {local: true}   // Natural Earth II из пакета Cesium (через jsDelivr) — работает всегда
 };
@@ -393,17 +396,18 @@ const BASES = {
   satellite: {n: 'Спутниковая',     L: ['esriImg']},
   physical:  {n: 'Физическая',      L: ['esriPhys'], hs: true},
   political: {n: 'Политико-адм.',   L: ['voyager']},
-  topo:      {n: 'Топографическая', L: ['topo']},
+  topo:      {n: 'Топографическая', L: ['topoRelief', 'labels']},
+  otm:       {n: 'OpenTopoMap',     L: ['otm']},
   osm:       {n: 'OpenStreetMap',   L: ['osm']},
   dark:      {n: 'Тёмная (атлас)',  L: ['dark']},
   ne:        {n: 'Natural Earth (офлайн-вид)', L: ['ne']}
 };
-const FALLBACK = ['osm', 'political', 'dark', 'topo', 'ne'];
+const FALLBACK = ['osm', 'political', 'dark', 'otm', 'ne'];
 S.badBase = new Set();
 const probes = {};
 function probe(key) {
   const s = SPEC[key];
-  if (s.local) return Promise.resolve(true);
+  if (s.local || s.custom) return Promise.resolve(true);
   if (probes[key]) return probes[key];
   const url = s.url.replace('{s}', (s.sub || 'a')[0]).replace('{z}', '2').replace('{x}', '3').replace('{y}', '1');
   return probes[key] = new Promise(res => {
@@ -416,6 +420,7 @@ function probe(key) {
 }
 function makeLayer(key) {
   const s = SPEC[key];
+  if (s.custom) return new C.ImageryLayer(new TopoReliefProvider());
   if (s.local) return C.ImageryLayer.fromProviderAsync(C.TileMapServiceImageryProvider.fromUrl(C.buildModuleUrl('Assets/Textures/NaturalEarthII')));
   return new C.ImageryLayer(new C.UrlTemplateImageryProvider({url: s.url, maximumLevel: s.max, credit: s.credit, subdomains: s.sub || 'a'}));
 }
@@ -442,6 +447,7 @@ async function setBase(k, auto) {
   }
   S.base = k; LS.set('base', k);
   $('#baseSel').value = k;
+  if (typeof topoMode === 'function') topoMode(k === 'topo');
   if (typeof applyOverlays === 'function') applyOverlays();   // снимки/климат — поверх новой подложки
   if (typeof applyNight === 'function') applyNight();
   if (S.leftPanel === 'layers' && !$('#left').classList.contains('hidden')) openLeft('layers');
@@ -535,6 +541,127 @@ async function terrariumHeights(pts, z = 11) {
     out.push(Math.max(0, d[o] * 256 + d[o + 1] + d[o + 2] / 256 - 32768));
   }
   return out;
+}
+
+/* ---------- Топографическая карта ----------
+   Строится в браузере из цифровой модели рельефа (Terrain Tiles: SRTM, GMTED2010, ETOPO1):
+   послойная окраска высот + отмывка + горизонтали с подписями. Сечение рельефа зависит от масштаба.
+   Поверх: реки и озёра, населённые пункты, подписи (CARTO), координатная сетка. */
+const TOPO_STOPS = [[-1, [169, 207, 232]], [0, [178, 214, 160]], [100, [196, 224, 168]], [200, [221, 233, 178]], [400, [238, 232, 176]],
+  [700, [240, 214, 150]], [1000, [228, 190, 124]], [1500, [207, 154, 99]], [2000, [184, 129, 90]], [2500, [160, 113, 88]], [3000, [236, 232, 226]]];
+function topoColor(h) {
+  if (h <= 0) return TOPO_STOPS[0][1];
+  for (let i = 2; i < TOPO_STOPS.length; i++) if (h < TOPO_STOPS[i][0]) {
+    const [h0, c0] = TOPO_STOPS[i - 1], [h1, c1] = TOPO_STOPS[i], t = (h - h0) / (h1 - h0);
+    return [c0[0] + (c1[0] - c0[0]) * t, c0[1] + (c1[1] - c0[1]) * t, c0[2] + (c1[2] - c0[2]) * t];
+  }
+  return TOPO_STOPS[TOPO_STOPS.length - 1][1];
+}
+const contourStep = z => z <= 5 ? 500 : z <= 6 ? 250 : z <= 7 ? 200 : z <= 8 ? 100 : z <= 10 ? 50 : z <= 11 ? 25 : 20;
+const topoCache = new Map();
+async function renderTopoTile(x, y, z) {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const d = await loadTerrariumTile(Math.min(z, 15), x, y, topoCache);
+  if (!d) throw new Error('нет данных рельефа');                    // Cesium возьмёт тайл уровнем выше
+  const N = 256, H = new Float32Array(N * N);
+  for (let i = 0; i < N * N; i++) H[i] = d[i * 4] * 256 + d[i * 4 + 1] + d[i * 4 + 2] / 256 - 32768;
+  if (z <= 9) {                                                       // сглаживание шума DEM на мелких масштабах
+    const T = H.slice();
+    for (let r = 1; r < N - 1; r++) for (let q = 1; q < N - 1; q++) {
+      let sum = 0; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) sum += T[(r + a) * N + q + b];
+      H[r * N + q] = sum / 9;
+    }
+  }
+  const n = 2 ** z, lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + .5) / n)));
+  const mpp = 156543.03 * Math.cos(lat) / n;                          // метров в пикселе
+  const img = g.createImageData(N, N), az = 315 * Math.PI / 180, zen = 45 * Math.PI / 180, zf = 2.2;
+  for (let r = 0; r < N; r++) for (let q = 0; q < N; q++) {
+    const i = r * N + q, h = H[i];
+    const L = H[r * N + Math.max(0, q - 1)], R = H[r * N + Math.min(N - 1, q + 1)], U = H[Math.max(0, r - 1) * N + q], D = H[Math.min(N - 1, r + 1) * N + q];
+    const dx = (R - L) / (2 * mpp), dy = (D - U) / (2 * mpp);
+    const slope = Math.atan(zf * Math.hypot(dx, dy)), aspect = Math.atan2(dy, -dx);
+    const shade = Math.max(0, Math.cos(zen) * Math.cos(slope) + Math.sin(zen) * Math.sin(slope) * Math.cos(az - Math.PI / 2 - aspect));
+    const col = topoColor(h), k = h <= 0 ? 1 : .62 + .5 * shade;
+    img.data[i * 4] = Math.min(255, col[0] * k); img.data[i * 4 + 1] = Math.min(255, col[1] * k); img.data[i * 4 + 2] = Math.min(255, col[2] * k); img.data[i * 4 + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  // горизонтали: «марширующие квадраты»
+  const step = contourStep(z), thin = new Path2D(), thick = new Path2D(), labelSegs = [];
+  for (let r = 0; r < N - 1; r++) for (let q = 0; q < N - 1; q++) {
+    const v = [H[r * N + q], H[r * N + q + 1], H[(r + 1) * N + q + 1], H[(r + 1) * N + q]];
+    const lo = Math.min(...v), hi = Math.max(...v);
+    if (hi <= 0) continue;
+    for (let Lv = Math.ceil(lo / step) * step; Lv < hi; Lv += step) {
+      if (Lv <= 0) continue;
+      const P = [[q, r], [q + 1, r], [q + 1, r + 1], [q, r + 1]], pts = [];
+      for (let e = 0; e < 4; e++) {
+        const a = v[e], b = v[(e + 1) % 4];
+        if ((a < Lv) !== (b < Lv)) { const t = (Lv - a) / (b - a), A = P[e], B = P[(e + 1) % 4]; pts.push([A[0] + (B[0] - A[0]) * t + .5, A[1] + (B[1] - A[1]) * t + .5]); }
+      }
+      const idx = Math.round(Lv / step) % 5 === 0, path = idx ? thick : thin;
+      for (let s2 = 0; s2 + 1 < pts.length; s2 += 2) {
+        path.moveTo(pts[s2][0], pts[s2][1]); path.lineTo(pts[s2 + 1][0], pts[s2 + 1][1]);
+        if (idx) labelSegs.push([pts[s2], pts[s2 + 1], Lv]);
+      }
+    }
+  }
+  g.lineJoin = 'round'; g.strokeStyle = 'rgba(128,78,34,.55)'; g.lineWidth = .8; g.stroke(thin);
+  g.strokeStyle = 'rgba(118,66,24,.85)'; g.lineWidth = 1.5; g.stroke(thick);
+  // подписи утолщённых горизонталей — не чаще одной на клетку 96×96 px
+  if (z >= 8) {
+    const used = new Set();
+    g.font = '600 10px Manrope, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (const [a, b, Lv] of labelSegs) {
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+      if (mx < 20 || mx > 236 || my < 14 || my > 242) continue;
+      const cell = Math.floor(mx / 96) + ',' + Math.floor(my / 96); if (used.has(cell)) continue; used.add(cell);
+      let ang = Math.atan2(b[1] - a[1], b[0] - a[0]); if (ang > Math.PI / 2) ang -= Math.PI; if (ang < -Math.PI / 2) ang += Math.PI;
+      g.save(); g.translate(mx, my); g.rotate(ang);
+      const t = String(Math.round(Lv)), w = g.measureText(t).width + 4;
+      g.fillStyle = 'rgba(244,236,214,.92)'; g.fillRect(-w / 2, -6, w, 12);
+      g.fillStyle = '#6b3d14'; g.fillText(t, 0, 0); g.restore();
+    }
+  }
+  return c;
+}
+class TopoReliefProvider {
+  constructor() {
+    this.tilingScheme = new C.WebMercatorTilingScheme(); this.rectangle = this.tilingScheme.rectangle;
+    this.tileWidth = 256; this.tileHeight = 256; this.minimumLevel = 0; this.maximumLevel = 14;
+    this.errorEvent = new C.Event(); this.hasAlphaChannel = false; this.ready = true; this.readyPromise = Promise.resolve(true);
+    this.credit = new C.Credit('Топооснова: горизонтали и отмывка по DEM Terrain Tiles (Mapzen / AWS; SRTM, GMTED2010, ETOPO1)');
+    this.tileDiscardPolicy = undefined; this.proxy = undefined; this.defaultAlpha = undefined;
+  }
+  getTileCredits() { return undefined; }
+  pickFeatures() { return undefined; }
+  requestImage(x, y, level) { return renderTopoTile(x, y, level); }
+}
+/* координатная сетка с подписями (градусы) */
+const dsGrid = ds('grid');
+function drawGrid() {
+  dsGrid.entities.removeAll();
+  const col = C.Color.fromCssColorString('#3b2a1a').withAlpha(.55), lab = (text, lon, lat) => dsGrid.entities.add({position: C.Cartesian3.fromDegrees(lon, lat),
+    label: {text, font: '600 11px Manrope, sans-serif', fillColor: C.Color.fromCssColorString('#3b2a1a'), outlineColor: C.Color.fromCssColorString('#f4ecd6'), outlineWidth: 3,
+      style: C.LabelStyle.FILL_AND_OUTLINE, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, distanceDisplayCondition: new C.DistanceDisplayCondition(0, 4e6)}});
+  for (let la = 52; la <= 78; la += 2) {
+    dsGrid.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(Array.from({length: 41}, (_, i) => [96 + i * 2, la]).flat()), width: 1, material: col, arcType: C.ArcType.RHUMB}});
+    for (let lo = 104; lo <= 168; lo += 16) lab(la + '° с.ш.', lo, la + .15);
+  }
+  for (let lo = 96; lo <= 176; lo += 4) {
+    dsGrid.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray([lo, 50, lo, 80]), width: 1, material: col, arcType: C.ArcType.RHUMB}});
+    for (let la = 56; la <= 76; la += 6) lab(lo + '° в.д.', lo + .1, la + 1);
+  }
+}
+function topoMode(on) {
+  S.topo = on;
+  if (on) {
+    if (!dsGrid.entities.values.length) drawGrid();
+    dsGrid.show = true;
+    if (!S.layers.rivers) toggleLayerUI('rivers', true);              // гидрография — часть топокарты
+    if (!S.layers.lakes) toggleLayerUI('lakes', true);
+  } else dsGrid.show = false;
+  $('#topoInfo').style.display = on ? '' : 'none';
 }
 const TERRAIN_NAME = {none: 'без рельефа', free: 'Terrain Tiles (открытые данные, без ключа)', ion: 'Cesium World Terrain'};
 async function setTerrain(src, token, quiet) {
@@ -2384,6 +2511,7 @@ scene.preRender.addEventListener(() => {
     const cv = scene.canvas, cx = cv.clientWidth / 2, cy = cv.clientHeight / 2;
     const a = pickCarto(new C.Cartesian2(cx - 50, cy)), b = pickCarto(new C.Cartesian2(cx + 50, cy));
     $('#scale').textContent = a && b ? '100 px ≈ ' + (() => { const d = geoDist(a, b); return d > 2000 ? fmt(d / 1000, d > 20000 ? 0 : 1) + ' км' : fmt(d) + ' м'; })() : '—';
+    if (S.topo && a && b) { const mpp = geoDist(a, b) / 100, z = Math.round(Math.log2(156543.03 * Math.cos(a.latitude) / mpp)); $('#topoStep').textContent = contourStep(Math.min(14, z)) + ' м (утолщённые — через ' + contourStep(Math.min(14, z)) * 5 + ' м)'; }
   }
 });
 
