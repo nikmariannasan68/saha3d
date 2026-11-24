@@ -387,7 +387,6 @@ const SPEC = {
   dark:     {url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', sub: 'abcd', max: 18, credit: '© OpenStreetMap contributors, © CARTO'},
   otm:      {url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', sub: 'abc', max: 17, credit: '© OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)'},
   topoRelief: {custom: true},   // своя топооснова: горизонтали, послойная окраска, отмывка — из DEM
-  labels:   {url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png', sub: 'abcd', max: 18, credit: '© OpenStreetMap contributors, © CARTO'},
   osm:      {url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', max: 19, credit: '© OpenStreetMap contributors'},
   ne:       {local: true}   // Natural Earth II из пакета Cesium (через jsDelivr) — работает всегда
 };
@@ -396,7 +395,7 @@ const BASES = {
   satellite: {n: 'Спутниковая',     L: ['esriImg']},
   physical:  {n: 'Физическая',      L: ['esriPhys'], hs: true},
   political: {n: 'Политико-адм.',   L: ['voyager']},
-  topo:      {n: 'Топографическая', L: ['topoRelief', 'labels']},
+  topo:      {n: 'Топографическая', L: ['topoRelief']},
   otm:       {n: 'OpenTopoMap',     L: ['otm']},
   osm:       {n: 'OpenStreetMap',   L: ['osm']},
   dark:      {n: 'Тёмная (атлас)',  L: ['dark']},
