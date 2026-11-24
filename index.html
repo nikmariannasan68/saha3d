@@ -1445,7 +1445,7 @@ async function openObject(ref, silent) {
   if (ref.kind === 'river') { if (!S.rivers) await toggleLayerUI('rivers', true); return selectRiver(S.riverById.get(ref.id), silent); }
   if (ref.kind === 'lake') { if (!S.lakes) await toggleLayerUI('lakes', true); return selectLake(S.lakeById.get(ref.id), silent); }
   if (ref.kind === 'theme') { if (!S.th[ref.key]) await toggleLayerUI('th_' + ref.key, true); return selectTheme(ref.key, ref.id, silent); }
-  if (ref.kind === 'mark') { const m = LS.get('marks', []).find(x => x.id === ref.id); if (m) camera.flyTo({destination: C.Cartesian3.fromDegrees(m.lon, m.lat, 30000), duration: 1.6}); }
+  if (ref.kind === 'mark' || ref.kind === 'pmark') return selectMark(ref.id, silent);
 }
 
 function selectDistrict(d, silent) {
@@ -1683,6 +1683,7 @@ function buildIndex() {
   (S.rivers || []).forEach(r => ix.push({n: r.name, a: [r.name_en], k: 'Река', ref: {kind: 'river', id: r.id}, w: 4.2}));
   (S.lakes || []).forEach(l => ix.push({n: l.name, a: [], k: 'Озеро · ' + fmt(l.area) + ' км²', ref: {kind: 'lake', id: l.id}, w: 3.5}));
   for (const k in S.th) S.th[k].forEach(o => { const n = nm(o.tags); if (n) ix.push({n, a: [o.tags.name, o.tags['name:sah'], o.tags.official_name, o.tags.iata, o.tags.icao], k: THEMES[k].n, ref: {kind: 'theme', key: k, id: o.id}, w: k === 'peaks' || k === 'airports' || k === 'oopt' ? 3.8 : 2.5}); });
+  for (const m of [...(S.pubMarks || []), ...(S.marks || [])]) ix.push({n: m.name, a: [m.desc.slice(0, 80)], k: (m.pub ? 'Метка атласа' : 'Моя метка') + ' · ' + (MARK_CATS[m.cat] || '').replace(/^\S+\s/, ''), ref: {kind: m.pub ? 'pmark' : 'mark', id: m.id}, w: 4.5});
   ix.forEach(o => { o.s = [o.n, ...o.a].filter(Boolean).map(norm); });
   S.index = ix;
 }
@@ -1823,7 +1824,7 @@ function toolClick(pos) {
     $('#mread').innerHTML = `${lat.toFixed(5)}°, ${lon.toFixed(5)}° · ${dms(lat, 'С', 'Ю')} ${dms(lon, 'В', 'З')}${h != null ? ' · высота ≈ ' + fmt(h) + ' м' : ''}`;
     return;
   }
-  if (S.tool === 'mark') { addMark(C.Math.toDegrees(c.longitude), C.Math.toDegrees(c.latitude)); return; }
+  if (S.tool === 'mark') { setTool(null); addMark(C.Math.toDegrees(c.longitude), C.Math.toDegrees(c.latitude)); return; }
   M.pts.push(c); redrawMeasure();
 }
 function dms(v, p, n) { const a = Math.abs(v), d = Math.floor(a), m = Math.floor((a - d) * 60), s = ((a - d) * 60 - m) * 60; return `${d}°${m}′${s.toFixed(0)}″${v >= 0 ? p : n}`; }
@@ -1884,19 +1885,148 @@ async function finishTool() {
       <div class="muted" style="font-size:11px">Источник высот: ${esc(TERRAIN_NAME[S.terrainSrc] || '')}. Вертикальный масштаб растянут.</div>`;
   } catch (e) { box.innerHTML = '<div class="note">Не удалось получить высоты: ' + esc(e.message) + '</div>'; }
 }
+/* ---------- Мои метки: название, категория, описание, фото, ссылка ----------
+   Хранятся в IndexedDB этого браузера (фото сжимаются до 1280 px). Можно скачать файлом GeoJSON
+   и загрузить на другом устройстве. Метки автора, опубликованные с сайтом, — data/marks.geojson. */
+const MARK_CATS = {place: '📍 Место', sight: '★ Достопримечательность', monument: '🗿 Памятник', nature: '🌲 Природа', museum: '🏛 Музей',
+  history: '📜 Историческое место', school: '🎓 Школа, учреждение', home: '🏠 Дом, усадьба', event: '🎉 Событие, праздник', other: '• Другое'};
+S.marks = []; S.pubMarks = [];
+async function loadMarks() {
+  let m = await IDB.get('marks');
+  if (!m) { m = LS.get('marks', []); if (m.length) { await IDB.set('marks', m); } }
+  S.marks = (m || []).map(x => ({cat: 'place', desc: '', photos: [], link: '', ...x}));
+  const pub = await snap('marks.geojson');
+  if (pub && pub.features) S.pubMarks = pub.features.filter(f => f.geometry && f.geometry.type === 'Point').map((f, i) => {
+    const p = f.properties || {};
+    return {id: 'p' + i, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], name: p.name || 'Метка', cat: p.category || 'place', desc: p.description || '', photos: p.photos || [], link: p.link || '', pub: true};
+  });
+  renderMarks(); buildIndex();
+}
+async function saveMarks() { await IDB.set('marks', S.marks); LS.del('marks'); }
 function addMark(lon, lat, name) {
-  const marks = LS.get('marks', []);
-  const m = {id: 'm' + Date.now(), lon: +lon.toFixed(6), lat: +lat.toFixed(6), name: name || 'Метка ' + (marks.length + 1), t: Date.now()};
-  marks.unshift(m); LS.set('marks', marks); renderMarks(); toast(`${esc(m.name)} сохранена`);
+  const m = {id: 'm' + Date.now(), lon: +lon.toFixed(6), lat: +lat.toFixed(6), name: name || 'Метка ' + (S.marks.length + 1), cat: 'place', desc: '', photos: [], link: '', t: Date.now()};
+  S.marks.unshift(m); saveMarks(); renderMarks(); buildIndex();
+  selectMark(m.id, true, true);                                      // сразу открываем редактор
+  return m;
 }
 function renderMarks() {
   dsU.entities.removeAll();
-  LS.get('marks', []).forEach(m => {
+  for (const m of [...S.pubMarks, ...S.marks]) {
+    const col = C.Color.fromCssColorString(m.pub ? '#facc15' : '#f472b6');
     const e = dsU.entities.add({position: C.Cartesian3.fromDegrees(m.lon, m.lat),
-      point: {pixelSize: 10, color: C.Color.fromCssColorString('#f472b6'), outlineColor: C.Color.WHITE, outlineWidth: 2, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY},
-      label: {text: m.name, font: '600 12px Manrope', pixelOffset: new C.Cartesian2(0, -16), fillColor: C.Color.WHITE, outlineColor: C.Color.BLACK, outlineWidth: 3, style: C.LabelStyle.FILL_AND_OUTLINE, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY}});
-    e.saha = {kind: 'mark', id: m.id};
+      point: {pixelSize: 11, color: col, outlineColor: C.Color.WHITE, outlineWidth: 2, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY},
+      label: {text: (m.photos.length ? '📷 ' : '') + m.name, font: '600 12px Manrope, sans-serif', pixelOffset: new C.Cartesian2(0, -17), fillColor: C.Color.WHITE, outlineColor: C.Color.BLACK, outlineWidth: 3,
+        style: C.LabelStyle.FILL_AND_OUTLINE, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        distanceDisplayCondition: new C.DistanceDisplayCondition(0, 1.5e6)}});
+    e.saha = {kind: m.pub ? 'pmark' : 'mark', id: m.id};
+  }
+}
+const markById = id => S.marks.find(x => x.id === id) || S.pubMarks.find(x => x.id === id);
+function compressImage(file, max = 1280) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => { const k = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src); res(c.toDataURL('image/jpeg', .82)); };
+    img.onerror = () => rej(new Error('не удалось прочитать изображение')); img.src = URL.createObjectURL(file);
   });
+}
+function lightbox(src) {
+  const b = document.createElement('div');
+  b.style.cssText = 'position:fixed;inset:0;z-index:90;background:rgba(2,6,14,.9);display:flex;align-items:center;justify-content:center;cursor:zoom-out;padding:20px';
+  b.innerHTML = `<img src="${esc(src)}" style="max-width:100%;max-height:100%;border-radius:12px;box-shadow:0 10px 60px rgba(0,0,0,.6)">`;
+  b.onclick = () => b.remove(); document.body.appendChild(b);
+}
+const photosHTML = (m, edit) => m.photos.length ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0">${m.photos.map((p, i) =>
+  `<div style="position:relative"><img src="${esc(p)}" data-ph="${i}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;cursor:zoom-in;border:1px solid var(--line)">${edit ? `<button class="btn" data-delph="${i}" title="Удалить фото" style="position:absolute;top:3px;right:3px;padding:1px 7px">×</button>` : ''}</div>`).join('')}</div>` : '';
+function selectMark(id, silent, edit) {
+  const m = markById(id); if (!m) return;
+  const ref = {kind: m.pub ? 'pmark' : 'mark', id}; S.sel = ref;
+  if (!silent) { stopFlight(); camera.flyTo({destination: C.Cartesian3.fromDegrees(m.lon, m.lat - .02, 2500), orientation: {heading: 0, pitch: C.Math.toRadians(-45), roll: 0}, duration: 1.8}); }
+  dsSel.entities.removeAll();
+  dsSel.entities.add({position: C.Cartesian3.fromDegrees(m.lon, m.lat), ellipse: {semiMajorAxis: 60, semiMinorAxis: 60, material: GOLD.withAlpha(.45)}});
+  const d = districtOf(m.lon, m.lat);
+  setCrumbs([{t: 'Якутия'}, {t: m.pub ? 'Метки атласа' : 'Мои метки'}, {t: m.name, ref}]);
+  if (edit && !m.pub) {
+    showPanel(`
+      <div class="kick">Редактирование метки</div>
+      <div class="sec">Название</div><input id="mkName" style="width:100%" maxlength="120" value="${esc(m.name)}">
+      <div class="sec">Категория</div><select id="mkCat" style="width:100%">${Object.entries(MARK_CATS).map(([k, v]) => `<option value="${k}" ${m.cat === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <div class="sec">Описание</div><textarea id="mkDesc" rows="7" style="width:100%;font-family:inherit;color:var(--text);background:rgba(6,12,24,.7);border:1px solid var(--line2);border-radius:10px;padding:8px 10px;font-size:13px;resize:vertical" placeholder="Что это за место, история, интересные факты…">${esc(m.desc)}</textarea>
+      <div class="sec">Фотографии (до 6)</div>
+      <div id="mkPhotos">${photosHTML(m, true)}</div>
+      <label class="btn" style="display:inline-block;${m.photos.length >= 6 ? 'opacity:.4;pointer-events:none' : ''}">📷 Добавить фото<input type="file" id="mkFile" accept="image/*" multiple style="display:none"></label>
+      <div class="sec">Ссылка (необязательно)</div><input id="mkLink" style="width:100%" placeholder="https://…" value="${esc(m.link)}">
+      <div class="facts">${fact('Координаты', coord(m.lon, m.lat), 'WGS84', true)}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn gold" id="mkSave">Сохранить</button><button class="btn" id="mkCancel">Отмена</button><button class="btn" id="mkDel" style="margin-left:auto">🗑 Удалить</button></div>
+      <div class="note">Метка хранится в этом браузере. Чтобы перенести её или опубликовать на сайте для всех — «Сохранённое» → «Скачать мои метки».</div>`);
+    const draft = {...m, photos: [...m.photos]};
+    const redrawPh = () => { $('#mkPhotos').innerHTML = photosHTML(draft, true); wirePh(); };
+    const wirePh = () => {
+      $('#rb').querySelectorAll('[data-ph]').forEach(im => im.onclick = () => lightbox(draft.photos[+im.dataset.ph]));
+      $('#rb').querySelectorAll('[data-delph]').forEach(b => b.onclick = () => { draft.photos.splice(+b.dataset.delph, 1); redrawPh(); });
+    };
+    wirePh();
+    $('#mkFile').onchange = async e => {
+      for (const f of [...e.target.files].slice(0, 6 - draft.photos.length)) {
+        try { draft.photos.push(await compressImage(f)); } catch (x) { toast(esc(x.message), 'err'); }
+      }
+      e.target.value = ''; redrawPh();
+      if (draft.photos.length >= 6) toast('Можно прикрепить до 6 фотографий');
+    };
+    $('#mkSave').onclick = async () => {
+      Object.assign(m, {name: $('#mkName').value.trim() || m.name, cat: $('#mkCat').value, desc: $('#mkDesc').value.trim(), link: $('#mkLink').value.trim(), photos: draft.photos});
+      try { await saveMarks(); toast('Метка сохранена'); } catch (x) { toast('Не удалось сохранить: ' + esc(x.message), 'err'); }
+      renderMarks(); buildIndex(); selectMark(m.id, true, false);
+    };
+    $('#mkCancel').onclick = () => selectMark(m.id, true, false);
+    $('#mkDel').onclick = () => deleteMarkAsk(m);
+    setTimeout(() => $('#mkName') && $('#mkName').select(), 50);
+    return;
+  }
+  const link = /^https?:\/\//.test(m.link) ? `<div class="sec">Ссылка</div><a style="color:var(--ice);word-break:break-all" href="${esc(m.link)}" target="_blank" rel="noopener">${esc(m.link)}</a>` : '';
+  showPanel(`
+    <div class="kick">${esc(MARK_CATS[m.cat] || MARK_CATS.place)}${m.pub ? ' · метка атласа' : ' · моя метка'}</div>
+    <div class="pt">${esc(m.name)}</div>
+    ${m.pub ? '' : `<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn" id="mkEdit">✎ Изменить</button><button class="btn" id="mkDel">🗑 Удалить</button></div>`}
+    ${photosHTML(m, false)}
+    ${m.desc ? `<div class="txt" style="white-space:pre-wrap;margin-top:10px">${esc(m.desc)}</div>` : (m.pub ? '' : '<div class="tbd" style="margin-top:10px">Описания пока нет — нажмите «Изменить».</div>')}
+    ${link}
+    <div class="facts">${fact('Улус / округ', d ? esc(nm(d.tags)) : TBD, 'по границам OSM')}${fact('Координаты', coord(m.lon, m.lat), 'WGS84')}</div>
+    ${m.pub ? '<div class="src">Метка добавлена автором атласа.</div>' : '<div class="src">Хранится в этом браузере.</div>'}`);
+  $('#rb').querySelectorAll('[data-ph]').forEach(im => im.onclick = () => lightbox(m.photos[+im.dataset.ph]));
+  if ($('#mkEdit')) $('#mkEdit').onclick = () => selectMark(m.id, true, true);
+  if ($('#mkDel')) $('#mkDel').onclick = () => deleteMarkAsk(m);
+}
+function deleteMarkAsk(m) {
+  toast(`Удалить метку «${esc(m.name)}»${m.photos.length ? ' вместе с фото' : ''}? Это нельзя отменить.`, 'err', {label: 'Удалить', fn: async () => {
+    S.marks = S.marks.filter(x => x !== m); await saveMarks(); renderMarks(); buildIndex(); goHome(); toast('Метка удалена');
+  }});
+}
+function marksGeoJSON(list) {
+  return {type: 'FeatureCollection', features: list.map(m => ({type: 'Feature', geometry: {type: 'Point', coordinates: [m.lon, m.lat]},
+    properties: {name: m.name, category: m.cat, description: m.desc, link: m.link, photos: m.photos, created: m.t ? new Date(m.t).toISOString() : undefined}}))};
+}
+function downloadMarks() {
+  const blob = new Blob([JSON.stringify(marksGeoJSON(S.marks))], {type: 'application/geo+json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'saha3d-metki-' + new Date().toISOString().slice(0, 10) + '.geojson';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast(`Файл с ${S.marks.length} метками сохранён в «Загрузки»`);
+}
+async function importMarks(file) {
+  try {
+    const j = JSON.parse(await file.text()); let n = 0;
+    for (const f of j.features || []) {
+      if (!f.geometry || f.geometry.type !== 'Point') continue;
+      const p = f.properties || {}, [lon, lat] = f.geometry.coordinates;
+      if (S.marks.some(m => Math.abs(m.lon - lon) < 1e-6 && Math.abs(m.lat - lat) < 1e-6 && m.name === p.name)) continue;   // уже есть
+      S.marks.push({id: 'm' + Date.now() + '_' + n, lon: +lon, lat: +lat, name: String(p.name || 'Метка'), cat: MARK_CATS[p.category] ? p.category : 'place',
+        desc: String(p.description || ''), link: String(p.link || ''), photos: Array.isArray(p.photos) ? p.photos.filter(x => /^data:image\//.test(x) || /^https?:|^data\//.test(x)).slice(0, 6) : [], t: Date.now()});
+      n++;
+    }
+    await saveMarks(); renderMarks(); buildIndex(); toast(`Загружено меток: ${n}`); openLeft('saved');
+  } catch (e) { toast('Не удалось прочитать файл: ' + esc(e.message), 'err'); }
 }
 
 /* ---------- 10. UI wiring: left panels ---------- */
@@ -1994,11 +2124,17 @@ const LEFT = {
     <button class="btn" data-tool="" style="width:100%">Очистить измерения</button>
     <div class="note">Расстояние считается по эллипсоиду WGS84 (геодезическое) и как прямое пространственное с учётом высот точек. Профиль даёт также длину по поверхности рельефа. Масштаб и компас — в нижней панели.</div>`,
   saved: () => {
-    const f = LS.get('fav', []), h = LS.get('hist', []), m = LS.get('marks', []);
+    const f = LS.get('fav', []), h = LS.get('hist', []), m = S.marks;
     const it = o => `<div class="item" data-ref='${esc(JSON.stringify(o))}'><span>${esc(o.name)}</span><small>${(o.kind === 'theme' ? (THEMES[o.key] || {}).n : ({district: 'улус', nasleg: 'наслег', place: 'нас. пункт', river: 'река', lake: 'озеро', mark: 'метка'})[o.kind]) || ''}</small></div>`;
     return `<div class="sec">Избранное</div>${f.map(it).join('') || '<div class="muted">Пусто — нажмите ☆ в карточке объекта</div>'}
-      <div class="sec">Мои метки</div>${m.map(x => it({kind: 'mark', id: x.id, name: x.name})).join('') || '<div class="muted">Нет меток</div>'}
-      ${m.length ? '<button class="btn" id="copyMarks" style="width:100%;margin-top:6px">Копировать метки (GeoJSON)</button><button class="btn" id="delMarks" style="width:100%;margin-top:6px">Удалить все метки</button>' : ''}
+      <div class="sec">Мои метки (${m.length})</div>
+      ${m.map(x => `<div class="item" data-ref='${esc(JSON.stringify({kind: 'mark', id: x.id}))}'><span>${esc(x.name)}${x.photos.length ? ' <small>📷' + x.photos.length + '</small>' : ''}</span><small>${esc((MARK_CATS[x.cat] || '').replace(/^\S+\s/, ''))}</small></div>`).join('') || '<div class="muted">Нет меток. Инструменты (линейка) → «Поставить метку», затем клик по карте.</div>'}
+      <div style="display:grid;gap:6px;margin-top:8px">
+        ${m.length ? '<button class="btn" id="dlMarks">⬇ Скачать мои метки (файл с фото)</button>' : ''}
+        <label class="btn" style="text-align:center">⬆ Загрузить метки из файла<input type="file" id="ulMarks" accept=".geojson,.json,application/geo+json,application/json" style="display:none"></label>
+        ${m.length ? '<button class="btn" id="delMarks">Удалить все мои метки</button>' : ''}
+      </div>
+      <div class="note">Метки и фото хранятся только в этом браузере. Скачанный файл можно загрузить на другом компьютере — или прислать разработчику, чтобы метки появились на сайте у всех посетителей.</div>
       <div class="sec">История</div>${h.map(it).join('') || '<div class="muted">Пока пусто</div>'}
       <div class="note">Хранится только в этом браузере.</div>`;
   },
@@ -2158,8 +2294,9 @@ const LEFT_WIRE = {
   tools: () => $('#lb').querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool || null)),
   saved: () => {
     $('#lb').querySelectorAll('[data-ref]').forEach(el => el.onclick = () => openObject(JSON.parse(el.dataset.ref)));
-    if ($('#copyMarks')) $('#copyMarks').onclick = () => navigator.clipboard.writeText(JSON.stringify({type: 'FeatureCollection', features: LS.get('marks', []).map(m => ({type: 'Feature', properties: {name: m.name}, geometry: {type: 'Point', coordinates: [m.lon, m.lat]}}))})).then(() => toast('Метки скопированы'), () => toast('Буфер обмена недоступен', 'err'));
-    if ($('#delMarks')) $('#delMarks').onclick = () => { LS.set('marks', []); renderMarks(); openLeft('saved'); };
+    if ($('#dlMarks')) $('#dlMarks').onclick = downloadMarks;
+    $('#ulMarks').onchange = e => { if (e.target.files[0]) importMarks(e.target.files[0]); };
+    if ($('#delMarks')) $('#delMarks').onclick = () => toast(`Удалить все ${S.marks.length} меток вместе с фото? Это нельзя отменить.`, 'err', {label: 'Удалить все', fn: async () => { S.marks = []; await saveMarks(); renderMarks(); buildIndex(); openLeft('saved'); }});
   },
   edu: () => {
     $('#lb').querySelectorAll('[data-quiz]').forEach(b => b.onclick = () => { if (!S.districts.length) return toast('Данные ещё загружаются'); quizStart(b.dataset.quiz); });
@@ -2175,7 +2312,8 @@ function hoverOutline(d) {
 }
 function setHover(s, pos) {
   const tip = $('#tip');
-  if (!s || s.kind === 'mark') { if (S.hover) { S.hover = null; dsH.entities.removeAll(); } tip.classList.add('hidden'); scene.canvas.style.cursor = ''; return; }
+  if (s && (s.kind === 'mark' || s.kind === 'pmark')) { const m = markById(s.id); if (S.hover) { S.hover = null; dsH.entities.removeAll(); } if (m) { tip.innerHTML = `<b>${esc(m.name)}</b><span class="muted">${esc(MARK_CATS[m.cat] || '')}${m.photos.length ? ' · 📷 ' + m.photos.length : ''}</span>`; tip.style.left = pos.x + 'px'; tip.style.top = pos.y + 'px'; tip.classList.remove('hidden'); scene.canvas.style.cursor = 'pointer'; } return; }
+  if (!s) { if (S.hover) { S.hover = null; dsH.entities.removeAll(); } tip.classList.add('hidden'); scene.canvas.style.cursor = ''; return; }
   scene.canvas.style.cursor = 'pointer';
   let html = '';
   if (s.kind === 'district') { const d = S.byId.get(s.id); html = `<b>${esc(nm(d.tags))}</b>Центр: ${d.centre ? esc(nm(d.centre.tags)) : '—'}<br><span class="muted">${fmt(d.area)} км²${d.tags.population ? ' · ' + fmt(d.tags.population) + ' чел.' : ''}</span>`; }
@@ -2338,7 +2476,7 @@ window.addEventListener('keydown', e => { if (e.key === 'Escape') { if (S.tool) 
 
 /* ---------- boot ---------- */
 S.lang = LS.get('lang', 'ru'); $('#langSel').value = S.lang;
-setBase(S.base); renderMarks();
+setBase(S.base); loadMarks();
 for (const k of ['aurora', 'clouds', 'snow']) if (S.fx[k]) setFx(k, true);
 S.terrainSrc = 'none';
 scene.verticalExaggeration = LS.get('vex', 1.5);
