@@ -491,7 +491,7 @@ function freeTerrainProvider() {
   return new C.CustomHeightmapTerrainProvider({
     width: N, height: N, tilingScheme: ts,
     credit: 'Рельеф: Terrain Tiles (Mapzen / AWS Open Data; SRTM, GMTED2010, ETOPO1 и др.)',
-    callback: async (x, y, level) => {
+    callback: freeTerrainProvider._cb = async (x, y, level) => {
       const h = new Float32Array(N * N);
       let missing = false;
       try {
@@ -521,7 +521,11 @@ function freeTerrainProvider() {
         }
       } catch (e) { console.warn('terrain tile', e); }
       // нет данных — отказ: Cesium возьмёт рельеф родительского тайла (без «ям» нулевой высоты)
-      if (missing) throw new Error('terrain tile not loaded');
+      if (missing) {
+        // верхние уровни (0–2) не имеют «родителя»: их отказ скрыл бы весь глобус — повторяем, затем отдаём плоский тайл
+        if (level <= 2) { S._t0 = (S._t0 || 0) + 1; if (S._t0 < 40) { await sleep(1500); return freeTerrainProvider._cb(x, y, level); } return new Float32Array(N * N); }
+        throw new Error('terrain tile not loaded');
+      }
       return h;
     }
   });
