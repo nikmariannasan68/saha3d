@@ -699,8 +699,8 @@ function topoMode(on) {
   if (on) {
     if (!dsGrid.entities.values.length) drawGrid();
     dsGrid.show = true;
-    if (!S.layers.rivers) toggleLayerUI('rivers', true);              // гидрография — часть топокарты
-    if (!S.layers.lakes) toggleLayerUI('lakes', true);
+    if (!S.focus && !S.layers.rivers) toggleLayerUI('rivers', true);              // гидрография — часть топокарты
+    if (!S.focus && !S.layers.lakes) toggleLayerUI('lakes', true);
   } else dsGrid.show = false;
   $('#topoInfo').style.display = on ? '' : 'none';
 }
@@ -1578,6 +1578,7 @@ function districtOf(lon, lat) { return S.districts.find(d => inBbox(lon, lat, d.
 function showPanel(html) { $('#rb').innerHTML = html; $('#right').classList.remove('off'); document.body.classList.add('panel'); $('#rb').scrollTop = 0; }
 function closePanel() { $('#right').classList.add('off'); document.body.classList.remove('panel'); }
 function goHome() {
+  if (S.focus) { exitFocus(true); }
   stopFlight(); S.sel = null; dsSel.entities.removeAll(); dsN.entities.removeAll(); paintDistricts(null); closePanel();
   setCrumbs([{t: 'Республика Саха (Якутия)'}]); camera.flyTo({...HOME, duration: 2});
 }
@@ -1614,6 +1615,7 @@ async function openObject(ref, silent) {
   if (ref.kind === 'lake') { if (!S.lakes) await toggleLayerUI('lakes', true); return selectLake(S.lakeById.get(ref.id), silent); }
   if (ref.kind === 'theme') { if (!S.th[ref.key]) await toggleLayerUI('th_' + ref.key, true); return selectTheme(ref.key, ref.id, silent); }
   if (ref.kind === 'mark' || ref.kind === 'pmark') return selectMark(ref.id, silent);
+  if (ref.kind === 'hydro') return ref.id && selectHydro(ref.id);
 }
 
 function selectDistrict(d, silent) {
@@ -1626,7 +1628,7 @@ function selectDistrict(d, silent) {
     <div class="kick">${isOkrug ? 'Городской округ' : 'Муниципальный район (улус)'}</div>
     <div class="pt">${esc(nm(t))}</div>
     ${t['name:sah'] && S.lang !== 'sah' ? `<div class="alt">${esc(t['name:sah'])} <span class="muted">· саха тыла (OSM)</span></div>` : ''}
-    <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">${favBtn(ref, nm(t))}<button class="btn" id="orbitBtn">✈ Облёт улуса</button></div>
+    <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">${favBtn(ref, nm(t))}<button class="btn" id="orbitBtn">✈ Облёт улуса</button><button class="btn on" id="topoUlusBtn">🗺 Детальная топокарта</button></div>
     <div class="tabs"><button class="tab on" data-t="ov">Обзор</button><button class="tab" data-t="nas">Наслеги</button><button class="tab" data-t="pl">Населённые пункты (${d.places.length})</button></div>
     <div id="tabBody"></div>`);
   const tabs = {
@@ -1654,6 +1656,7 @@ function selectDistrict(d, silent) {
   };
   $('#rb').querySelectorAll('.tab').forEach(b => b.onclick = () => showTab(b.dataset.t));
   $('#orbitBtn').onclick = () => startOrbit(d.bbox, 'Облёт: ' + nm(t));
+  $('#topoUlusBtn').onclick = () => focusUlus(d);
   showTab('ov');
 }
 function placeList(list) {
@@ -1851,6 +1854,7 @@ function buildIndex() {
   (S.rivers || []).forEach(r => ix.push({n: r.name, a: [r.name_en], k: 'Река', ref: {kind: 'river', id: r.id}, w: 4.2}));
   (S.lakes || []).forEach(l => ix.push({n: l.name, a: [], k: 'Озеро · ' + fmt(l.area) + ' км²', ref: {kind: 'lake', id: l.id}, w: 3.5}));
   for (const k in S.th) S.th[k].forEach(o => { const n = nm(o.tags); if (n) ix.push({n, a: [o.tags.name, o.tags['name:sah'], o.tags.official_name, o.tags.iata, o.tags.icao], k: THEMES[k].n, ref: {kind: 'theme', key: k, id: o.id}, w: k === 'peaks' || k === 'airports' || k === 'oopt' ? 3.8 : 2.5}); });
+  (S.hydro || []).forEach(h => ix.push({n: h.n, a: [h.s], k: (HYD_KIND[h.k] || 'водоём') + ' · ' + (S.focus ? nm(S.byId.get(S.focus).tags) : ''), ref: {kind: 'hydro', id: h.id}, w: 3.6}));
   for (const m of [...(S.pubMarks || []), ...(S.marks || [])]) ix.push({n: m.name, a: [m.desc.slice(0, 80)], k: (m.pub ? 'Метка атласа' : 'Моя метка') + ' · ' + (MARK_CATS[m.cat] || '').replace(/^\S+\s/, ''), ref: {kind: m.pub ? 'pmark' : 'mark', id: m.id}, w: 4.5});
   ix.forEach(o => { o.s = [o.n, ...o.a].filter(Boolean).map(norm); });
   S.index = ix;
@@ -2197,6 +2201,190 @@ async function importMarks(file) {
   } catch (e) { toast('Не удалось прочитать файл: ' + esc(e.message), 'err'); }
 }
 
+/* ---------- Детальная топокарта улуса ----------
+   Режим «только один улус»: вокруг — затемнение, точная граница улуса и наслегов,
+   вся гидрография OSM (реки, ручьи, каналы, озёра, пруды, водохранилища) с гидронимами.
+   Данные: снимок data/ulus/<id>.json, иначе Overpass + Nominatim (кэш в IndexedDB). */
+const dsF = ds('focus');
+const HYD_KIND = {river: 'река', stream: 'ручей / речка', canal: 'канал', ditch: 'канава', drain: 'дренаж', lake: 'озеро', pond: 'пруд', reservoir: 'водохранилище', oxbow: 'старица', water: 'водоём'};
+const HYD_W = {river: 3.2, canal: 2.2, stream: 1.6, ditch: 1.1, drain: 1.1};
+S.hydro = []; S.hydroById = new Map();
+function stitchRings(ways) {                                          // сборка колец мультиполигона из отрезков
+  const segs = ways.map(w => w.slice()), rings = [];
+  while (segs.length) {
+    let r = segs.shift();
+    for (let guard = 0; guard < 5000 && !(r.length > 3 && r[0][0] === r[r.length - 1][0] && r[0][1] === r[r.length - 1][1]); guard++) {
+      const end = r[r.length - 1], i = segs.findIndex(s => (s[0][0] === end[0] && s[0][1] === end[1]) || (s[s.length - 1][0] === end[0] && s[s.length - 1][1] === end[1]));
+      if (i < 0) break;
+      const s = segs.splice(i, 1)[0]; r = r.concat((s[0][0] === end[0] && s[0][1] === end[1] ? s : s.reverse()).slice(1));
+    }
+    if (r.length > 3) rings.push(r);
+  }
+  return rings;
+}
+async function loadUlusDetail(d, progress) {
+  const ck = 'ulus_v1_' + d.id;
+  let data = await snap('ulus/' + d.id + '.json') || await IDB.get(ck);
+  if (data) return data;
+  progress('Точная граница улуса (Nominatim)…');
+  let border = d.geometry;
+  try { const [f] = await nominatimPolygons([+d.id], 0.0002); if (f && /Polygon/.test(f.geometry.type)) border = roundGeom(f.geometry); } catch (e) { console.warn(e); }
+  progress('Гидрография улуса из OpenStreetMap — реки, ручьи, озёра (до 1–2 минут)…');
+  const j = await overpass(`[out:json][timeout:240];rel(${d.id});map_to_area->.a;(way(area.a)["waterway"~"^(river|stream|canal|ditch|drain)$"];way(area.a)["natural"="water"];rel(area.a)["natural"="water"];way(area.a)["landuse"="reservoir"];);out geom qt;`, null, 300000);
+  const r5 = v => Math.round(v * 1e5) / 1e5, pt = g => g.map(p => [r5(p.lon), r5(p.lat)]);
+  const lines = [], lakes = [];
+  for (const e of j.elements) {
+    const t = e.tags || {};
+    if (e.type === 'way' && t.waterway && e.geometry) { lines.push({id: 'w' + e.id, n: t['name:ru'] || t.name || '', s: t['name:sah'] || '', k: t.waterway, c: pt(e.geometry)}); continue; }
+    let rings = [];
+    if (e.type === 'way' && e.geometry && e.geometry.length > 3) rings = [pt(e.geometry)];
+    if (e.type === 'relation' && e.members) rings = stitchRings(e.members.filter(m => m.type === 'way' && m.role !== 'inner' && m.geometry).map(m => pt(m.geometry)));
+    if (!rings.length) continue;
+    const k = t.water || (t.landuse === 'reservoir' ? 'reservoir' : 'lake');
+    lakes.push({id: (e.type === 'way' ? 'w' : 'r') + e.id, n: t['name:ru'] || t.name || '', s: t['name:sah'] || '', k, r: rings});
+  }
+  data = {t: Date.now(), id: d.id, border, lines, lakes};
+  await IDB.set(ck, data);
+  return data;
+}
+function buildHydro(data) {
+  S.hydro = []; S.hydroById.clear();
+  const byName = new Map();
+  for (const l of data.lines) {
+    const len = turf.length(turf.lineString(l.c));
+    if (l.n) { const key = l.k + '|' + l.n; const g = byName.get(key) || {id: 'l:' + key, kind: 'line', n: l.n, s: l.s, k: l.k, len: 0, parts: []}; g.len += len; g.parts.push(l.c); if (!g.s && l.s) g.s = l.s; byName.set(key, g); }
+    l.len = len;
+  }
+  byName.forEach(g => { g.bbox = turf.bbox(turf.multiLineString(g.parts)); S.hydro.push(g); });
+  for (const l of data.lakes) {
+    try {
+      const f = turf.polygon([l.r[0]]); l.area = turf.area(f) / 1e6; l.pt = turf.pointOnFeature(f).geometry.coordinates; l.bbox = turf.bbox(f);
+    } catch (e) { l.area = 0; l.pt = l.r[0][0]; l.bbox = [l.pt[0], l.pt[1], l.pt[0], l.pt[1]]; }
+    if (l.n) S.hydro.push({id: 'a:' + l.id, kind: 'area', n: l.n, s: l.s, k: l.k, area: l.area, pt: l.pt, bbox: l.bbox, rings: l.r});
+  }
+  S.hydro.sort((a, b) => a.n.localeCompare(b.n, 'ru'));
+  S.hydro.forEach(h => S.hydroById.set(h.id, h));
+}
+function renderUlus(d, data) {
+  dsF.entities.removeAll(); scene.primitives.remove(S.focusPrims?.lines); scene.primitives.remove(S.focusPrims?.lakes);
+  const WATER = C.Color.fromCssColorString('#1d63c9'), LAKE = C.Color.fromCssColorString('#86bdf0');
+  // затемнение всего, что вне улуса
+  const outer = [[60, 30], [200, 30], [200, 85], [60, 85], [60, 30]];
+  dsF.entities.add({polygon: {hierarchy: new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray(outer.flat()),
+    polysOf(data.border).map(p => new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray(p[0].flat())))), material: C.Color.fromCssColorString('#0b1020').withAlpha(.72)}});
+  // озёра и водоёмы — одним пакетом
+  const lakeInst = [], lineInst = [];
+  for (const l of data.lakes) for (const ring of l.r) {
+    try { lakeInst.push(new C.GeometryInstance({geometry: new C.PolygonGeometry({polygonHierarchy: new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray(ring.flat()))}),
+      attributes: {color: C.ColorGeometryInstanceAttribute.fromColor(LAKE)}, id: {saha: {kind: 'hydro', id: l.n ? 'a:' + l.id : null, raw: l}}}));
+    lineInst.push(new C.GeometryInstance({geometry: new C.GroundPolylineGeometry({positions: C.Cartesian3.fromDegreesArray(ring.flat()), width: 1.2}),
+      attributes: {color: C.ColorGeometryInstanceAttribute.fromColor(WATER)}, id: {saha: {kind: 'hydro', id: l.n ? 'a:' + l.id : null, raw: l}}})); } catch (e) {}
+  }
+  for (const l of data.lines) {
+    if (l.c.length < 2) continue;
+    lineInst.push(new C.GeometryInstance({geometry: new C.GroundPolylineGeometry({positions: C.Cartesian3.fromDegreesArray(l.c.flat()), width: HYD_W[l.k] || 1.4}),
+      attributes: {color: C.ColorGeometryInstanceAttribute.fromColor(WATER)}, id: {saha: {kind: 'hydro', id: l.n ? 'l:' + l.k + '|' + l.n : null, raw: l}}}));
+  }
+  S.focusPrims = {
+    lakes: lakeInst.length ? scene.primitives.add(new C.GroundPrimitive({geometryInstances: lakeInst, appearance: new C.PerInstanceColorAppearance({flat: true, translucent: false}), asynchronous: true})) : null,
+    lines: lineInst.length ? scene.primitives.add(new C.GroundPolylinePrimitive({geometryInstances: lineInst, appearance: new C.PolylineColorAppearance(), asynchronous: true})) : null
+  };
+  dsR.show = false; dsL.show = false; dsD.show = false;
+  // граница улуса: белая подложка + малиновая линия (как на топокартах)
+  addRings(dsF, data.border, C.Color.WHITE.withAlpha(.85), 7);
+  addRings(dsF, data.border, C.Color.fromCssColorString('#a3125e'), 3.5);
+  // гидронимы
+  const lab = (text, lon, lat, size, far, italic = true) => dsF.entities.add({position: C.Cartesian3.fromDegrees(lon, lat),
+    label: {text, font: `${italic ? 'italic ' : ''}700 ${size}px Manrope, sans-serif`, fillColor: C.Color.fromCssColorString('#0f4fae'), outlineColor: C.Color.WHITE, outlineWidth: 4,
+      style: C.LabelStyle.FILL_AND_OUTLINE, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      distanceDisplayCondition: new C.DistanceDisplayCondition(0, far), scaleByDistance: new C.NearFarScalar(2e4, 1.1, 4e5, .8)}});
+  for (const h of S.hydro) {
+    if (h.kind === 'area') { lab(h.n, h.pt[0], h.pt[1], h.area > 5 ? 13 : 11, h.area > 20 ? 6e5 : h.area > 1 ? 2.5e5 : 8e4); continue; }
+    const big = h.k === 'river', every = big ? 35 : 15;                  // подпись через каждые ~35 км (реки) / 15 км (ручьи)
+    for (const part of h.parts) {
+      const f = turf.lineString(part), L = turf.length(f);
+      if (L < (big ? 3 : 1.2)) continue;
+      for (let s = Math.min(L / 2, every / 2); s < L; s += every) { const p = turf.along(f, s).geometry.coordinates; lab(h.n, p[0], p[1], big ? 13 : 11, big ? 7e5 : h.len > 20 ? 1.6e5 : 7e4); }
+    }
+  }
+}
+async function focusUlus(d) {
+  if (!d) return;
+  if (S.focus && S.focus !== d.id) exitFocus(true);
+  S.focus = d.id; stopFlight();
+  if (S.base !== 'topo') await setBase('topo');
+  S.focusPrev = {dsD: dsD.show, dsR: dsR.show, dsL: dsL.show, sse: globe.maximumScreenSpaceError};
+  dsD.show = false; dsR.show = false; dsL.show = false; dsSel.entities.removeAll();
+  globe.maximumScreenSpaceError = 1.1;                                   // больше детализации тайлов
+  S.places.forEach(p => { if (p.ent) p.ent.show = p.d === d.id; });
+  flyToBbox(d.bbox, -88, 2);
+  showPanel(`<div class="kick">Детальная топокарта</div><div class="pt">${esc(nm(d.tags))}</div><div id="ulusBody" class="muted" style="padding:10px 0">Загрузка…</div>`);
+  let data;
+  try { data = await loadUlusDetail(d, m => { const b = $('#ulusBody'); if (b) b.textContent = m; }); }
+  catch (e) { $('#ulusBody').innerHTML = `<div class="note">Не удалось загрузить гидрографию: ${esc(e.message)}</div><button class="btn" id="ulusRetry">Повторить</button> <button class="btn" id="ulusExit">Выйти</button>`;
+    $('#ulusRetry').onclick = () => focusUlus(d); $('#ulusExit').onclick = () => exitFocus(); return; }
+  if (S.focus !== d.id) return;
+  buildHydro(data); renderUlus(d, data);
+  try { const nas = await loadNaslegs(d); dsN.entities.removeAll();
+    for (const n of nas) {
+      addRings(dsN, n.geometry, C.Color.fromCssColorString('#a3125e').withAlpha(.75), 1.6, {kind: 'nasleg', id: n.id});
+      dsN.entities.add({position: C.Cartesian3.fromDegrees(n.pt[0], n.pt[1]), label: {text: nm(n.tags), font: '700 12px Manrope, sans-serif', fillColor: C.Color.fromCssColorString('#7a0f47'),
+        outlineColor: C.Color.WHITE, outlineWidth: 4, style: C.LabelStyle.FILL_AND_OUTLINE, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        distanceDisplayCondition: new C.DistanceDisplayCondition(0, 4e5)}});
+    }
+    dsN.show = true;
+  } catch (e) { console.warn(e); }
+  buildIndex();
+  const km = data.lines.reduce((s, l) => s + (l.len || 0), 0), named = S.hydro.length;
+  const cnt = k => data.lines.filter(l => l.k === k).length;
+  $('#ulusBody').outerHTML = `
+    <div class="facts">
+      ${fact('Водотоков (линий OSM)', fmt(data.lines.length), `реки ${fmt(cnt('river'))} · ручьи ${fmt(cnt('stream'))} · каналы ${fmt(cnt('canal') + cnt('ditch') + cnt('drain'))}`)}
+      ${fact('Длина водотоков', fmt(km) + ' км', 'сумма по геометрии OSM')}
+      ${fact('Озёр и водоёмов', fmt(data.lakes.length), 'контуры OSM natural=water')}
+      ${fact('Гидронимов', fmt(named), 'объекты с названием в OSM')}
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">
+      <button class="btn on" id="ulusMark">📍 Поставить метку</button>
+      <button class="btn" id="ulusTop">⤓ Вид сверху</button>
+      <button class="btn" id="ulusExit">✕ Выйти из режима</button>
+    </div>
+    <div class="note">Метка: нажмите «Поставить метку», затем точку на карте — откроется редактор (название, описание, фото). Сечение рельефа — внизу экрана.</div>
+    <div class="sec">Гидронимы (${fmt(named)})</div>
+    <input id="hydQ" placeholder="Найти реку или озеро…" style="width:100%;margin-bottom:6px">
+    <div id="hydList"></div>
+    <div class="src">Источники: граница и гидрография — <a href="https://www.openstreetmap.org/relation/${d.id}" target="_blank">OpenStreetMap</a> (ODbL), данные от ${new Date(data.t).toLocaleDateString('ru-RU')}; рельеф — Terrain Tiles (SRTM, GMTED2010). Безымянные водоёмы показаны без подписи; полнота зависит от разметки OSM.</div>`;
+  const list = q => { q = norm(q || ''); const arr = S.hydro.filter(h => !q || norm(h.n).includes(q) || (h.s && norm(h.s).includes(q)));
+    $('#hydList').innerHTML = arr.slice(0, 300).map(h => `<div class="item" data-hyd="${esc(h.id)}"><span>${esc(h.n)}${h.s && h.s !== h.n ? ' <small class="muted">' + esc(h.s) + '</small>' : ''}</span><small>${HYD_KIND[h.k] || h.k} · ${h.kind === 'line' ? fmt(h.len, 1) + ' км' : fmt(h.area, 2) + ' км²'}</small></div>`).join('') + (arr.length > 300 ? `<div class="muted">…и ещё ${arr.length - 300}, уточните поиск</div>` : '') || '<div class="muted">Не найдено</div>';
+    $('#hydList').querySelectorAll('[data-hyd]').forEach(b => b.onclick = () => selectHydro(b.dataset.hyd)); };
+  list(); $('#hydQ').oninput = e => list(e.target.value);
+  $('#ulusMark').onclick = () => setTool('mark');
+  $('#ulusTop').onclick = () => flyToBbox(d.bbox, -89, 1.5);
+  $('#ulusExit').onclick = () => exitFocus();
+  setCrumbs([{t: 'Якутия'}, {t: nm(d.tags), ref: {kind: 'district', id: d.id}}, {t: 'Топокарта'}]);
+  LS.set('focus', d.id);
+}
+function selectHydro(id) {
+  const h = S.hydroById.get(id); if (!h) return;
+  dsSel.entities.removeAll();
+  const hl = C.Color.fromCssColorString('#ff3d7f');
+  if (h.kind === 'line') h.parts.forEach(p => dsSel.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(p.flat()), width: 6, material: new C.PolylineGlowMaterialProperty({glowPower: .25, color: hl}), clampToGround: true}}));
+  else h.rings.forEach(r => dsSel.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(r.flat()), width: 5, material: new C.PolylineGlowMaterialProperty({glowPower: .25, color: hl}), clampToGround: true}}));
+  const b = h.bbox, pad = Math.max(.02, (b[2] - b[0]) * .15);
+  flyToBbox([b[0] - pad, b[1] - pad / 2, b[2] + pad, b[3] + pad / 2], -85, 1.6);
+  toast(`<b>${esc(h.n)}</b> — ${HYD_KIND[h.k] || h.k}, ${h.kind === 'line' ? fmt(h.len, 1) + ' км (в пределах улуса, по OSM)' : fmt(h.area, 2) + ' км²'}`);
+}
+function exitFocus(silent) {
+  if (!S.focus) return;
+  S.focus = null; LS.del('focus');
+  dsF.entities.removeAll(); dsSel.entities.removeAll(); dsN.entities.removeAll();
+  if (S.focusPrims) { scene.primitives.remove(S.focusPrims.lines); scene.primitives.remove(S.focusPrims.lakes); S.focusPrims = null; }
+  const p = S.focusPrev || {}; dsD.show = p.dsD ?? true; dsR.show = p.dsR ?? true; dsL.show = p.dsL ?? true; globe.maximumScreenSpaceError = p.sse || 1.6;
+  S.places.forEach(q => { if (q.ent) q.ent.show = true; });
+  S.hydro = []; S.hydroById.clear(); buildIndex();
+  if (!silent) goHome();
+}
+
 /* ---------- 10. UI wiring: left panels ---------- */
 function openLeft(p) {
   S.leftPanel = p;
@@ -2481,6 +2669,7 @@ function hoverOutline(d) {
 function setHover(s, pos) {
   const tip = $('#tip');
   if (s && (s.kind === 'mark' || s.kind === 'pmark')) { const m = markById(s.id); if (S.hover) { S.hover = null; dsH.entities.removeAll(); } if (m) { tip.innerHTML = `<b>${esc(m.name)}</b><span class="muted">${esc(MARK_CATS[m.cat] || '')}${m.photos.length ? ' · 📷 ' + m.photos.length : ''}</span>`; tip.style.left = pos.x + 'px'; tip.style.top = pos.y + 'px'; tip.classList.remove('hidden'); scene.canvas.style.cursor = 'pointer'; } return; }
+  if (s && s.kind === 'hydro') { if (S.hover) { S.hover = null; dsH.entities.removeAll(); } const r = s.raw || {}; tip.innerHTML = `<b>${esc(r.n || 'Без названия в OSM')}</b><span class="muted">${HYD_KIND[r.k] || r.k || 'водоём'}${r.area ? ' · ' + fmt(r.area, 2) + ' км²' : r.len ? ' · участок ' + fmt(r.len, 1) + ' км' : ''}</span>`; tip.style.left = pos.x + 'px'; tip.style.top = pos.y + 'px'; tip.classList.remove('hidden'); scene.canvas.style.cursor = s.id ? 'pointer' : ''; return; }
   if (!s) { if (S.hover) { S.hover = null; dsH.entities.removeAll(); } tip.classList.add('hidden'); scene.canvas.style.cursor = ''; return; }
   scene.canvas.style.cursor = 'pointer';
   let html = '';
@@ -2524,6 +2713,10 @@ async function journey() {
   }
   await fly({...HOME, duration: 2.8, easingFunction: E});
   enterMap();
+}
+function ulusFromURL() {
+  const q = new URLSearchParams(location.search).get('ulus'); if (!q) return null;
+  const k = norm(q); return S.byId.get(q) || S.districts.find(d => norm(nm(d.tags)).includes(k) || norm(d.tags.name).includes(k) || norm(d.tags['name:en'] || '').includes(k));
 }
 function enterMap() {
   if (S.phase === 'map') return;
@@ -2665,6 +2858,7 @@ function boot() {
   return dataReady;
 }
 boot();
+dataReady.then(() => { const d = ulusFromURL(); if (d) { S.skip = true; camera.cancelFlight(); dsRep.show = S.layers.republic; enterMap(); focusUlus(d); } });
 window.SAHA = {viewer, S};
 /* Сборка снимка геоданных — запускается вручную на локальном сервере (start-saha3d.bat):
    SAHA.exportSnapshot() — сохраняет все данные в папку data/ рядом с index.html */
@@ -2684,7 +2878,8 @@ SAHA.exportSnapshot = async (log = console.log) => {
   await loadRivers(); await save('rivers.json', {src: S.riversSrc, rivers: S.rivers.map(({ents, ...r}) => r)});
   await loadLakes(); await save('lakes.json', {src: S.lakesSrc, lakes: S.lakes.map(({f, ...l}) => l)});
   log('Готово'); return true;
-};   // для отладки из консоли
+};
+SAHA.ulusData = id => IDB.get('ulus_v1_' + id);   // для отладки из консоли
 </script>
 </body>
 </html>
