@@ -2272,11 +2272,11 @@ function buildHydro(data) {
 function renderUlus(d, data) {
   dsF.entities.removeAll(); scene.primitives.remove(S.focusPrims?.lines); scene.primitives.remove(S.focusPrims?.lakes);
   const WATER = C.Color.fromCssColorString('#1d63c9'), LAKE = C.Color.fromCssColorString('#86bdf0');
-  // затемнение всего, что вне улуса
-  const bb = turf.bbox({type: 'Feature', geometry: data.border, properties: {}}), e = 6;
-  const outer = [[bb[0] - e, bb[1] - e], [bb[2] + e, bb[1] - e], [bb[2] + e, bb[3] + e], [bb[0] - e, bb[3] + e], [bb[0] - e, bb[1] - e]];
-  dsF.entities.add({polygon: {hierarchy: new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray(outer.flat()),
-    polysOf(data.border).map(p => new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray(p[0].flat())))), material: C.Color.fromCssColorString('#0b1020').withAlpha(.7)}});
+  // всё, что вне улуса, отсекается: на глобусе остаётся только территория улуса
+  if (C.ClippingPolygonCollection) {
+    globe.clippingPolygons = new C.ClippingPolygonCollection({inverse: true,
+      polygons: polysOf(data.border).map(p => new C.ClippingPolygon({positions: C.Cartesian3.fromDegreesArray(p[0].slice(0, -1).flat())}))});
+  }
   // озёра и водоёмы — одним пакетом
   const lakeInst = [], lineInst = [];
   for (const l of data.lakes) for (const ring of l.r) {
@@ -2300,15 +2300,19 @@ function renderUlus(d, data) {
   // гидронимы
   const lab = (text, lon, lat, size, far, italic = true) => dsF.entities.add({position: C.Cartesian3.fromDegrees(lon, lat),
     label: {text, font: `${italic ? 'italic ' : ''}700 ${size}px Manrope, sans-serif`, fillColor: C.Color.fromCssColorString('#0f4fae'), outlineColor: C.Color.WHITE, outlineWidth: 4,
-      style: C.LabelStyle.FILL_AND_OUTLINE, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      style: C.LabelStyle.FILL_AND_OUTLINE, disableDepthTestDistance: Number.POSITIVE_INFINITY,
       distanceDisplayCondition: new C.DistanceDisplayCondition(0, far), scaleByDistance: new C.NearFarScalar(2e4, 1.1, 4e5, .8)}});
   for (const h of S.hydro) {
     if (h.kind === 'area') { lab(h.n, h.pt[0], h.pt[1], h.area > 5 ? 13 : 11, h.area > 20 ? 6e5 : h.area > 1 ? 2.5e5 : 8e4); continue; }
-    const big = h.k === 'river', every = big ? 35 : 15;                  // подпись через каждые ~35 км (реки) / 15 км (ручьи)
-    for (const part of h.parts) {
+    const big = h.k === 'river' && h.len > 15, every = big ? 40 : 20, placed = [];   // подпись через ~40 км (реки) / 20 км (малые), без повторов рядом
+    for (const part of [...h.parts].sort((a, b) => b.length - a.length)) {
       const f = turf.lineString(part), L = turf.length(f);
-      if (L < (big ? 3 : 1.2)) continue;
-      for (let s = Math.min(L / 2, every / 2); s < L; s += every) { const p = turf.along(f, s).geometry.coordinates; lab(h.n, p[0], p[1], big ? 13 : 11, big ? 7e5 : h.len > 20 ? 1.6e5 : 7e4); }
+      if (L < 1) continue;
+      for (let s = Math.min(L / 2, every / 2); s < L; s += every) {
+        const p = turf.along(f, s).geometry.coordinates;
+        if (placed.some(q => turf.distance(q, p) < every * .8)) continue;
+        placed.push(p); lab(h.n, p[0], p[1], big ? 13 : 11, big ? 7e5 : h.len > 20 ? 2e5 : 9e4);
+      }
     }
   }
 }
@@ -2333,7 +2337,7 @@ async function focusUlus(d) {
     for (const n of nas) {
       addRings(dsN, n.geometry, C.Color.fromCssColorString('#a3125e').withAlpha(.75), 1.6, {kind: 'nasleg', id: n.id});
       dsN.entities.add({position: C.Cartesian3.fromDegrees(n.pt[0], n.pt[1]), label: {text: nm(n.tags), font: '700 12px Manrope, sans-serif', fillColor: C.Color.fromCssColorString('#7a0f47'),
-        outlineColor: C.Color.WHITE, outlineWidth: 4, style: C.LabelStyle.FILL_AND_OUTLINE, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        outlineColor: C.Color.WHITE, outlineWidth: 4, style: C.LabelStyle.FILL_AND_OUTLINE, disableDepthTestDistance: Number.POSITIVE_INFINITY,
         distanceDisplayCondition: new C.DistanceDisplayCondition(0, 4e5)}});
     }
     dsN.show = true;
@@ -2386,6 +2390,7 @@ function exitFocus(silent) {
   if (!S.focus) return;
   S.focus = null; LS.del('focus');
   dsF.entities.removeAll(); dsSel.entities.removeAll(); dsN.entities.removeAll();
+  if (globe.clippingPolygons) globe.clippingPolygons = undefined;
   if (S.focusPrims) { scene.primitives.remove(S.focusPrims.lines); scene.primitives.remove(S.focusPrims.lakes); S.focusPrims = null; }
   const p = S.focusPrev || {}; dsD.show = p.dsD ?? true; dsR.show = p.dsR ?? true; dsL.show = p.dsL ?? true; globe.maximumScreenSpaceError = p.sse || 1.6;
   S.places.forEach(q => { if (q.ent) q.ent.show = true; });
