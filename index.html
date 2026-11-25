@@ -2273,9 +2273,10 @@ function renderUlus(d, data) {
   dsF.entities.removeAll(); scene.primitives.remove(S.focusPrims?.lines); scene.primitives.remove(S.focusPrims?.lakes);
   const WATER = C.Color.fromCssColorString('#1d63c9'), LAKE = C.Color.fromCssColorString('#86bdf0');
   // затемнение всего, что вне улуса
-  const outer = [[60, 30], [200, 30], [200, 85], [60, 85], [60, 30]];
+  const bb = turf.bbox({type: 'Feature', geometry: data.border, properties: {}}), e = 6;
+  const outer = [[bb[0] - e, bb[1] - e], [bb[2] + e, bb[1] - e], [bb[2] + e, bb[3] + e], [bb[0] - e, bb[3] + e], [bb[0] - e, bb[1] - e]];
   dsF.entities.add({polygon: {hierarchy: new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray(outer.flat()),
-    polysOf(data.border).map(p => new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray(p[0].flat())))), material: C.Color.fromCssColorString('#0b1020').withAlpha(.72)}});
+    polysOf(data.border).map(p => new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray(p[0].flat())))), material: C.Color.fromCssColorString('#0b1020').withAlpha(.7)}});
   // озёра и водоёмы — одним пакетом
   const lakeInst = [], lineInst = [];
   for (const l of data.lakes) for (const ring of l.r) {
@@ -2295,8 +2296,7 @@ function renderUlus(d, data) {
   };
   dsR.show = false; dsL.show = false; dsD.show = false;
   // граница улуса: белая подложка + малиновая линия (как на топокартах)
-  addRings(dsF, data.border, C.Color.WHITE.withAlpha(.85), 7);
-  addRings(dsF, data.border, C.Color.fromCssColorString('#a3125e'), 3.5);
+  addRings(dsF, data.border, new C.PolylineOutlineMaterialProperty({color: C.Color.fromCssColorString('#b0126a'), outlineColor: C.Color.WHITE, outlineWidth: 1.5}), 5);
   // гидронимы
   const lab = (text, lon, lat, size, far, italic = true) => dsF.entities.add({position: C.Cartesian3.fromDegrees(lon, lat),
     label: {text, font: `${italic ? 'italic ' : ''}700 ${size}px Manrope, sans-serif`, fillColor: C.Color.fromCssColorString('#0f4fae'), outlineColor: C.Color.WHITE, outlineWidth: 4,
@@ -2321,7 +2321,7 @@ async function focusUlus(d) {
   dsD.show = false; dsR.show = false; dsL.show = false; dsSel.entities.removeAll();
   globe.maximumScreenSpaceError = 1.1;                                   // больше детализации тайлов
   S.places.forEach(p => { if (p.ent) p.ent.show = p.d === d.id; });
-  flyToBbox(d.bbox, -88, 2);
+  focusView(d.bbox, 2);
   showPanel(`<div class="kick">Детальная топокарта</div><div class="pt">${esc(nm(d.tags))}</div><div id="ulusBody" class="muted" style="padding:10px 0">Загрузка…</div>`);
   let data;
   try { data = await loadUlusDetail(d, m => { const b = $('#ulusBody'); if (b) b.textContent = m; }); }
@@ -2363,10 +2363,14 @@ async function focusUlus(d) {
     $('#hydList').querySelectorAll('[data-hyd]').forEach(b => b.onclick = () => selectHydro(b.dataset.hyd)); };
   list(); $('#hydQ').oninput = e => list(e.target.value);
   $('#ulusMark').onclick = () => setTool('mark');
-  $('#ulusTop').onclick = () => flyToBbox(d.bbox, -89, 1.5);
+  $('#ulusTop').onclick = () => focusView(d.bbox, 1.5);
   $('#ulusExit').onclick = () => exitFocus();
   setCrumbs([{t: 'Якутия'}, {t: nm(d.tags), ref: {kind: 'district', id: d.id}}, {t: 'Топокарта'}]);
   LS.set('focus', d.id);
+}
+function focusView(b, dur) {                                          // вид сверху: улус целиком, с запасом справа под панель
+  const w = b[2] - b[0], h = b[3] - b[1], panel = document.body.classList.contains('panel') && innerWidth > 900 ? .55 : .08;
+  camera.flyTo({destination: C.Rectangle.fromDegrees(b[0] - w * .06, b[1] - h * .06, b[2] + w * panel, b[3] + h * .06), duration: dur});
 }
 function selectHydro(id) {
   const h = S.hydroById.get(id); if (!h) return;
@@ -2375,7 +2379,7 @@ function selectHydro(id) {
   if (h.kind === 'line') h.parts.forEach(p => dsSel.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(p.flat()), width: 6, material: new C.PolylineGlowMaterialProperty({glowPower: .25, color: hl}), clampToGround: true}}));
   else h.rings.forEach(r => dsSel.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(r.flat()), width: 5, material: new C.PolylineGlowMaterialProperty({glowPower: .25, color: hl}), clampToGround: true}}));
   const b = h.bbox, pad = Math.max(.02, (b[2] - b[0]) * .15);
-  flyToBbox([b[0] - pad, b[1] - pad / 2, b[2] + pad, b[3] + pad / 2], -85, 1.6);
+  focusView([b[0] - pad, b[1] - pad / 2, b[2] + pad, b[3] + pad / 2], 1.6);
   toast(`<b>${esc(h.n)}</b> — ${HYD_KIND[h.k] || h.k}, ${h.kind === 'line' ? fmt(h.len, 1) + ' км (в пределах улуса, по OSM)' : fmt(h.area, 2) + ' км²'}`);
 }
 function exitFocus(silent) {
