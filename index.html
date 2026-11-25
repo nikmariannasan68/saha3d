@@ -1620,10 +1620,12 @@ async function openObject(ref, silent) {
   if (ref.kind === 'theme') { if (!S.th[ref.key]) await toggleLayerUI('th_' + ref.key, true); return selectTheme(ref.key, ref.id, silent); }
   if (ref.kind === 'mark' || ref.kind === 'pmark') return selectMark(ref.id, silent);
   if (ref.kind === 'hydro') return ref.id && selectHydro(ref.id);
+  if (ref.kind === 'ulustopo') return focusUlus(S.byId.get(ref.id));
 }
 
 function selectDistrict(d, silent) {
   if (!d) return;
+  if (S.focus && !silent) exitFocus(true);
   const ref = {kind: 'district', id: d.id}; S.sel = ref;
   if (!silent) { stopFlight(); paintDistricts(d.id); outline(d.geometry, 5); dsN.entities.removeAll(); flyToBbox(d.bbox); pushHist(ref, nm(d.tags)); }
   setCrumbs([{t: 'Якутия'}, {t: nm(d.tags), ref}]);
@@ -2319,9 +2321,10 @@ function renderUlus(d, data) {
 async function focusUlus(d) {
   if (!d) return;
   if (S.focus && S.focus !== d.id) exitFocus(true);
+  const again = S.focus === d.id;
   S.focus = d.id; stopFlight();
   if (S.base !== 'topo') await setBase('topo');
-  S.focusPrev = {dsD: dsD.show, dsR: dsR.show, dsL: dsL.show, sse: globe.maximumScreenSpaceError};
+  if (!again) S.focusPrev = {dsD: dsD.show, dsR: dsR.show, dsL: dsL.show, sse: globe.maximumScreenSpaceError};
   dsD.show = false; dsR.show = false; dsL.show = false; dsSel.entities.removeAll();
   globe.maximumScreenSpaceError = 1.1;                                   // больше детализации тайлов
   S.places.forEach(p => { if (p.ent) p.ent.show = p.d === d.id; });
@@ -2369,7 +2372,7 @@ async function focusUlus(d) {
   $('#ulusMark').onclick = () => setTool('mark');
   $('#ulusTop').onclick = () => focusView(d.bbox, 1.5);
   $('#ulusExit').onclick = () => exitFocus();
-  setCrumbs([{t: 'Якутия'}, {t: nm(d.tags), ref: {kind: 'district', id: d.id}}, {t: 'Топокарта'}]);
+  setCrumbs([{t: 'Якутия'}, {t: nm(d.tags), ref: {kind: 'district', id: d.id}}, {t: 'Топокарта', ref: {kind: 'ulustopo', id: d.id}}]);
   LS.set('focus', d.id);
 }
 function focusView(b, dur) {                                          // вид сверху: улус целиком, с запасом справа под панель
