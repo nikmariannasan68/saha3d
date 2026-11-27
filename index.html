@@ -2126,8 +2126,10 @@ function lightbox(src) {
   b.innerHTML = `<img src="${esc(src)}" style="max-width:100%;max-height:100%;border-radius:12px;box-shadow:0 10px 60px rgba(0,0,0,.6)">`;
   b.onclick = () => b.remove(); document.body.appendChild(b);
 }
-const photosHTML = (m, edit) => m.photos.length ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0">${m.photos.map((p, i) =>
-  `<div style="position:relative"><img src="${esc(p)}" data-ph="${i}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;cursor:zoom-in;border:1px solid var(--line)">${edit ? `<button class="btn" data-delph="${i}" title="Удалить фото" style="position:absolute;top:3px;right:3px;padding:1px 7px">×</button>` : ''}</div>`).join('')}</div>` : '';
+const extPhoto = u => /earth\.usercontent\.google\.com|googleusercontent\.com/.test(u);   // Google не даёт встраивать — открываем отдельной вкладкой
+const photosHTML = (m, edit) => m.photos.length ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0">${m.photos.map((p, i) => extPhoto(p)
+  ? `<a href="${esc(p)}" target="_blank" rel="noreferrer noopener" title="Фото из Google Earth — откроется в новой вкладке" style="display:flex;flex-direction:column;align-items:center;justify-content:center;aspect-ratio:1;border-radius:8px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ice);text-decoration:none;font-size:12px;gap:4px"><span style="font-size:22px">📷</span>Фото ${i + 1}<small class="muted">Google Earth ↗</small></a>`
+  : `<div style="position:relative"><img src="${esc(p)}" data-ph="${i}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;cursor:zoom-in;border:1px solid var(--line)">${edit ? `<button class="btn" data-delph="${i}" title="Удалить фото" style="position:absolute;top:3px;right:3px;padding:1px 7px">×</button>` : ''}</div>`).join('')}</div>` : '';
 function selectMark(id, silent, edit) {
   const m = markById(id); if (!m) return;
   const ref = {kind: m.pub ? 'pmark' : 'mark', id}; S.sel = ref;
