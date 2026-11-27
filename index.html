@@ -353,8 +353,22 @@ function envBlocked(reason, fileMode) {
 }
 const scene = viewer.scene, camera = viewer.camera, globe = scene.globe;
 if (location.protocol === 'file:') envBlocked('file://', true);
+function gpuLost() {
+  if (document.getElementById('envBox')) return;
+  const b = document.createElement('div'); b.id = 'envBox';
+  b.style.cssText = 'position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(2,6,14,.82);padding:20px';
+  b.innerHTML = `<div class="glass" style="max-width:520px;padding:24px;line-height:1.6">
+    <div class="kick">Видеокарта перегружена</div>
+    <div class="pt" style="font-size:20px">3D-карта остановилась</div>
+    <p class="txt">Браузер отключил 3D-графику (WebGL) — так бывает, когда видеокарте не хватает памяти. Данные атласа и ваши метки не пострадали.</p>
+    <ol class="txt" style="padding-left:20px"><li>Закройте другие тяжёлые вкладки.</li><li>Нажмите «Перезагрузить». Если не помогло — полностью закройте и снова откройте браузер.</li></ol>
+    <button class="btn on" style="margin-top:12px" onclick="location.href=location.pathname">Перезагрузить</button></div>`;
+  document.body.appendChild(b);
+}
+scene.canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); console.warn('WebGL context lost'); gpuLost(); });
 scene.renderError.addEventListener((sc, err) => {
   console.error(err);
+  if (scene.context._gl && scene.context._gl.isContextLost()) return gpuLost();
   envBlocked(String((err && err.message) || err).slice(0, 220));
 });
 viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(C.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
@@ -2342,13 +2356,18 @@ function buildHydro(data) {
   S.hydro.forEach(h => S.hydroById.set(h.id, h));
 }
 function renderUlus(d, data) {
-  dsF.entities.removeAll(); scene.primitives.remove(S.focusPrims?.lines); scene.primitives.remove(S.focusPrims?.lakes);
+  dsF.entities.removeAll(); ['lines', 'lakes', 'mask'].forEach(k => S.focusPrims?.[k] && scene.primitives.remove(S.focusPrims[k])); S.focusPrims = {};
   const WATER = C.Color.fromCssColorString('#1d63c9'), LAKE = C.Color.fromCssColorString('#86bdf0');
-  // всё, что вне улуса, отсекается: на глобусе остаётся только территория улуса
-  if (C.ClippingPolygonCollection) {
-    globe.clippingPolygons = new C.ClippingPolygonCollection({inverse: true,
-      polygons: polysOf(data.border).map(p => new C.ClippingPolygon({positions: C.Cartesian3.fromDegreesArray(p[0].slice(0, -1).flat())}))});
-  }
+  // всё, что вне улуса, закрыто тёмной маской (лёгкий вариант без обрезки глобуса — бережёт видеокарту)
+  try {
+    const bb = turf.bbox({type: 'Feature', geometry: data.border, properties: {}}), e = 4;
+    const frame = turf.bboxPolygon([bb[0] - e, bb[1] - e, bb[2] + e, bb[3] + e]);
+    const hole = turf.cleanCoords(turf.truncate({type: 'Feature', geometry: data.border, properties: {}}, {precision: 5}));
+    const mask = turf.difference(turf.featureCollection([frame, hole]));
+    const inst = polysOf(mask.geometry).map(p => new C.GeometryInstance({geometry: new C.PolygonGeometry({polygonHierarchy: hierarchy(p)}),
+      attributes: {color: C.ColorGeometryInstanceAttribute.fromColor(C.Color.fromCssColorString('#0b1020').withAlpha(.78))}}));
+    S.focusPrims.mask = scene.primitives.add(new C.GroundPrimitive({geometryInstances: inst, appearance: new C.PerInstanceColorAppearance({flat: true, translucent: true}), asynchronous: true}));
+  } catch (err) { console.warn('mask', err); }
   // озёра и водоёмы — одним пакетом
   const lakeInst = [], lineInst = [];
   for (const l of data.lakes) for (const ring of l.r) {
@@ -2362,10 +2381,10 @@ function renderUlus(d, data) {
     lineInst.push(new C.GeometryInstance({geometry: new C.GroundPolylineGeometry({positions: C.Cartesian3.fromDegreesArray(l.c.flat()), width: HYD_W[l.k] || 1.4}),
       attributes: {color: C.ColorGeometryInstanceAttribute.fromColor(WATER)}, id: {saha: {kind: 'hydro', id: l.n ? 'l:' + l.k + '|' + l.n : null, raw: l}}}));
   }
-  S.focusPrims = {
+  Object.assign(S.focusPrims, {
     lakes: lakeInst.length ? scene.primitives.add(new C.GroundPrimitive({geometryInstances: lakeInst, appearance: new C.PerInstanceColorAppearance({flat: true, translucent: false}), asynchronous: true})) : null,
     lines: lineInst.length ? scene.primitives.add(new C.GroundPolylinePrimitive({geometryInstances: lineInst, appearance: new C.PolylineColorAppearance(), asynchronous: true})) : null
-  };
+  });
   dsR.show = false; dsL.show = false; dsD.show = false;
   // граница улуса: белая подложка + малиновая линия (как на топокартах)
   addRings(dsF, data.border, new C.PolylineOutlineMaterialProperty({color: C.Color.fromCssColorString('#b0126a'), outlineColor: C.Color.WHITE, outlineWidth: 1.5}), 5);
@@ -2398,7 +2417,6 @@ async function focusUlus(d) {
   LS.set('base', S.focusBase || 'hybrid');                              // режим улуса не меняет подложку при следующем запуске
   if (!again) S.focusPrev = {dsD: dsD.show, dsR: dsR.show, dsL: dsL.show, sse: globe.maximumScreenSpaceError};
   dsD.show = false; dsR.show = false; dsL.show = false; dsSel.entities.removeAll();
-  globe.maximumScreenSpaceError = 1.1;                                   // больше детализации тайлов
   S.places.forEach(p => { if (p.ent) p.ent.show = p.d === d.id; });
   focusView(d.bbox, 2);
   showPanel(`<div class="kick">Детальная топокарта</div><div class="pt">${esc(nm(d.tags))}</div><div id="ulusBody" class="muted" style="padding:10px 0">Загрузка…</div>`);
@@ -2465,8 +2483,7 @@ function exitFocus(silent) {
   S.focus = null; LS.del('focus');
   if (S.focusBase && S.focusBase !== S.base) setBase(S.focusBase); S.focusBase = null;
   dsF.entities.removeAll(); dsSel.entities.removeAll(); dsN.entities.removeAll();
-  if (globe.clippingPolygons) globe.clippingPolygons = undefined;
-  if (S.focusPrims) { scene.primitives.remove(S.focusPrims.lines); scene.primitives.remove(S.focusPrims.lakes); S.focusPrims = null; }
+  if (S.focusPrims) { ['lines', 'lakes', 'mask'].forEach(k => S.focusPrims[k] && scene.primitives.remove(S.focusPrims[k])); S.focusPrims = null; }
   const p = S.focusPrev || {}; dsD.show = p.dsD ?? true; dsR.show = p.dsR ?? true; dsL.show = p.dsL ?? true; globe.maximumScreenSpaceError = p.sse || 1.6;
   S.places.forEach(q => { if (q.ent) q.ent.show = true; });
   S.hydro = []; S.hydroById.clear(); buildIndex();
