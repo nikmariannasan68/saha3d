@@ -2089,10 +2089,16 @@ function addMark(lon, lat, name) {
 }
 function renderMarks() {
   dsU.entities.removeAll();
+  // заливки контуров — одним GroundPrimitive с цветом на экземпляр (совместимо с обрезкой глобуса в режиме улуса)
+  if (S.markPolys) { scene.primitives.remove(S.markPolys); S.markPolys = null; }
+  const polyInst = [];
+  const addFill = (shape, css, alpha, id) => polysOf(shape).forEach(p => { try { polyInst.push(new C.GeometryInstance({
+    geometry: new C.PolygonGeometry({polygonHierarchy: hierarchy(p)}), id,
+    attributes: {color: C.ColorGeometryInstanceAttribute.fromColor(C.Color.fromCssColorString(css).withAlpha(alpha))}})); } catch (e) {} });
   for (const m of [...S.pubMarks, ...S.marks]) {
     if (m.shapeOnly) {                                                 // безымянный контур / линия из Google Earth — только геометрия
       const c = C.Color.fromCssColorString(m.color || '#1d63c9');
-      polysOf(m.shape).forEach(p => dsU.entities.add({polygon: {hierarchy: hierarchy(p), material: c.withAlpha(.35)}}));
+      addFill(m.shape, m.color || '#1d63c9', .35);
       [...linesOf(m.shape), ...polysOf(m.shape).map(p => p[0])].forEach(l => dsU.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(l.flat()), width: m.shape.type === 'LineString' ? 2.5 : 1.5, material: c, clampToGround: true}}));
       continue;
     }
@@ -2105,10 +2111,11 @@ function renderMarks() {
     e.saha = {kind: m.pub ? 'pmark' : 'mark', id: m.id};
     if (m.shape) {                                                     // река / озеро / урочище из KML — рисуем саму геометрию
       const water = m.cat === 'water', lc = C.Color.fromCssColorString(m.color || (water ? '#1d63c9' : '#b45309'));
-      polysOf(m.shape).forEach(p => { const pe = dsU.entities.add({polygon: {hierarchy: hierarchy(p), material: C.Color.fromCssColorString(m.color || (water ? '#60a5fa' : '#f59e0b')).withAlpha(.35)}}); pe.saha = e.saha; });
+      addFill(m.shape, m.color || (water ? '#60a5fa' : '#f59e0b'), .35, {saha: e.saha});
       [...linesOf(m.shape), ...polysOf(m.shape).map(p => p[0])].forEach(l => { const le = dsU.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(l.flat()), width: water ? 3 : 2, material: lc, clampToGround: true}}); le.saha = e.saha; });
     }
   }
+  if (polyInst.length) S.markPolys = scene.primitives.add(new C.GroundPrimitive({geometryInstances: polyInst, appearance: new C.PerInstanceColorAppearance({flat: true, translucent: true}), asynchronous: true}));
 }
 const markById = id => S.marks.find(x => x.id === id) || S.pubMarks.find(x => x.id === id);
 function compressImage(file, max = 1280) {
