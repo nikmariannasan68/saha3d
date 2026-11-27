@@ -2323,7 +2323,9 @@ async function focusUlus(d) {
   if (S.focus && S.focus !== d.id) exitFocus(true);
   const again = S.focus === d.id;
   S.focus = d.id; stopFlight();
+  if (!again) S.focusBase = S.base;
   if (S.base !== 'topo') await setBase('topo');
+  LS.set('base', S.focusBase || 'hybrid');                              // режим улуса не меняет подложку при следующем запуске
   if (!again) S.focusPrev = {dsD: dsD.show, dsR: dsR.show, dsL: dsL.show, sse: globe.maximumScreenSpaceError};
   dsD.show = false; dsR.show = false; dsL.show = false; dsSel.entities.removeAll();
   globe.maximumScreenSpaceError = 1.1;                                   // больше детализации тайлов
@@ -2373,7 +2375,6 @@ async function focusUlus(d) {
   $('#ulusTop').onclick = () => focusView(d.bbox, 1.5);
   $('#ulusExit').onclick = () => exitFocus();
   setCrumbs([{t: 'Якутия'}, {t: nm(d.tags), ref: {kind: 'district', id: d.id}}, {t: 'Топокарта', ref: {kind: 'ulustopo', id: d.id}}]);
-  LS.set('focus', d.id);
 }
 function focusView(b, dur) {                                          // вид сверху: улус целиком, с запасом справа под панель
   const w = b[2] - b[0], h = b[3] - b[1], panel = document.body.classList.contains('panel') && innerWidth > 900 ? .55 : .08;
@@ -2392,6 +2393,7 @@ function selectHydro(id) {
 function exitFocus(silent) {
   if (!S.focus) return;
   S.focus = null; LS.del('focus');
+  if (S.focusBase && S.focusBase !== S.base) setBase(S.focusBase); S.focusBase = null;
   dsF.entities.removeAll(); dsSel.entities.removeAll(); dsN.entities.removeAll();
   if (globe.clippingPolygons) globe.clippingPolygons = undefined;
   if (S.focusPrims) { scene.primitives.remove(S.focusPrims.lines); scene.primitives.remove(S.focusPrims.lakes); S.focusPrims = null; }
@@ -2874,7 +2876,8 @@ function boot() {
   return dataReady;
 }
 boot();
-dataReady.then(() => { const d = ulusFromURL(); if (d) { S.skip = true; camera.cancelFlight(); dsRep.show = S.layers.republic; enterMap(); focusUlus(d); } });
+dataReady.then(() => { const d = ulusFromURL(); if (new URLSearchParams(location.search).has('ulus')) history.replaceState(null, '', location.pathname);   // обновление страницы — снова начальная страница
+  if (d) { S.skip = true; camera.cancelFlight(); dsRep.show = S.layers.republic; enterMap(); focusUlus(d); } });
 window.SAHA = {viewer, S};
 /* Сборка снимка геоданных — запускается вручную на локальном сервере (start-saha3d.bat):
    SAHA.exportSnapshot() — сохраняет все данные в папку data/ рядом с index.html */
