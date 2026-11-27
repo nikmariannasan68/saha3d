@@ -2066,7 +2066,7 @@ async function finishTool() {
 /* ---------- Мои метки: название, категория, описание, фото, ссылка ----------
    Хранятся в IndexedDB этого браузера (фото сжимаются до 1280 px). Можно скачать файлом GeoJSON
    и загрузить на другом устройстве. Метки автора, опубликованные с сайтом, — data/marks.geojson. */
-const MARK_CATS = {place: '📍 Место', sight: '★ Достопримечательность', monument: '🗿 Памятник', nature: '🌲 Природа', museum: '🏛 Музей',
+const MARK_CATS = {place: '📍 Место', sight: '★ Достопримечательность', monument: '🗿 Памятник', nature: '🌲 Природа', water: '💧 Река, озеро', tract: '🌾 Урочище, местность', museum: '🏛 Музей',
   history: '📜 Историческое место', school: '🎓 Школа, учреждение', home: '🏠 Дом, усадьба', event: '🎉 Событие, праздник', other: '• Другое'};
 S.marks = []; S.pubMarks = [];
 async function loadMarks() {
@@ -2076,7 +2076,7 @@ async function loadMarks() {
   const pub = await snap('marks.geojson');
   if (pub && pub.features) S.pubMarks = pub.features.filter(f => f.geometry && f.geometry.type === 'Point').map((f, i) => {
     const p = f.properties || {};
-    return {id: 'p' + i, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], name: p.name || 'Метка', cat: p.category || 'place', desc: p.description || '', photos: p.photos || [], link: p.link || '', pub: true};
+    return {id: 'p' + i, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], name: p.name || 'Метка', cat: p.category || 'place', desc: p.description || '', photos: p.photos || [], link: p.link || '', shape: p.shape || null, pub: true};
   });
   renderMarks(); buildIndex();
 }
@@ -2097,6 +2097,11 @@ function renderMarks() {
         style: C.LabelStyle.FILL_AND_OUTLINE, heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY,
         distanceDisplayCondition: new C.DistanceDisplayCondition(0, 1.5e6)}});
     e.saha = {kind: m.pub ? 'pmark' : 'mark', id: m.id};
+    if (m.shape) {                                                     // река / озеро / урочище из KML — рисуем саму геометрию
+      const water = m.cat === 'water', lc = C.Color.fromCssColorString(water ? '#1d63c9' : '#b45309');
+      polysOf(m.shape).forEach(p => { const pe = dsU.entities.add({polygon: {hierarchy: hierarchy(p), material: (water ? C.Color.fromCssColorString('#60a5fa') : C.Color.fromCssColorString('#f59e0b')).withAlpha(.35)}}); pe.saha = e.saha; });
+      [...linesOf(m.shape), ...polysOf(m.shape).map(p => p[0])].forEach(l => { const le = dsU.entities.add({polyline: {positions: C.Cartesian3.fromDegreesArray(l.flat()), width: water ? 3 : 2, material: lc, clampToGround: true}}); le.saha = e.saha; });
+    }
   }
 }
 const markById = id => S.marks.find(x => x.id === id) || S.pubMarks.find(x => x.id === id);
@@ -2183,7 +2188,7 @@ function deleteMarkAsk(m) {
 }
 function marksGeoJSON(list) {
   return {type: 'FeatureCollection', features: list.map(m => ({type: 'Feature', geometry: {type: 'Point', coordinates: [m.lon, m.lat]},
-    properties: {name: m.name, category: m.cat, description: m.desc, link: m.link, photos: m.photos, created: m.t ? new Date(m.t).toISOString() : undefined}}))};
+    properties: {name: m.name, category: m.cat, description: m.desc, link: m.link, photos: m.photos, shape: m.shape || undefined, created: m.t ? new Date(m.t).toISOString() : undefined}}))};
 }
 function downloadMarks() {
   const blob = new Blob([JSON.stringify(marksGeoJSON(S.marks))], {type: 'application/geo+json'});
@@ -2192,15 +2197,65 @@ function downloadMarks() {
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   toast(`Файл с ${S.marks.length} метками сохранён в «Загрузки»`);
 }
+/* Импорт: GeoJSON, а также KML / KMZ (Google Earth, «Мои карты»). Точки — метки; линии и контуры
+   (реки, озёра, урочища) — метка в характерной точке + сама геометрия. */
+async function unzipFirstKml(buf) {
+  const u8 = new Uint8Array(buf), dv = new DataView(buf);
+  for (let i = 0; i + 30 < u8.length;) {
+    if (dv.getUint32(i, true) !== 0x04034b50) break;
+    const method = dv.getUint16(i + 8, true), csize = dv.getUint32(i + 18, true), nlen = dv.getUint16(i + 26, true), xlen = dv.getUint16(i + 28, true);
+    const name = new TextDecoder().decode(u8.subarray(i + 30, i + 30 + nlen)), start = i + 30 + nlen + xlen, data = u8.subarray(start, start + csize);
+    if (/\.kml$/i.test(name)) {
+      if (method === 0) return new TextDecoder().decode(data);
+      return await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+    }
+    i = start + csize;
+  }
+  throw new Error('в KMZ нет файла .kml');
+}
+function kmlToFeatures(text) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.querySelector('parsererror')) throw new Error('файл KML повреждён');
+  const coords = el => (el?.textContent || '').trim().split(/\s+/).map(t => t.split(',').map(Number)).filter(c => c.length >= 2 && isFinite(c[0]) && isFinite(c[1])).map(c => [+c[0].toFixed(6), +c[1].toFixed(6)]);
+  const folderPath = el => { const out = []; for (let p = el.parentElement; p; p = p.parentElement) if (/^(Folder|Document)$/.test(p.localName)) { const n = [...p.children].find(c => c.localName === 'name'); if (n && n.textContent.trim()) out.unshift(n.textContent.trim()); } return out; };
+  const feats = [];
+  for (const pm of doc.getElementsByTagNameNS('*', 'Placemark')) {
+    const kid = n => [...pm.children].find(c => c.localName === n);
+    const name = (kid('name')?.textContent || '').trim();
+    const html = (kid('description')?.textContent || '').trim();
+    const tmp = document.createElement('div'); tmp.innerHTML = html;
+    const photos = [...tmp.querySelectorAll('img')].map(i => i.getAttribute('src')).filter(u => /^https?:/.test(u || '')).slice(0, 6);
+    const desc = (tmp.innerText || tmp.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+    const pts = [...pm.getElementsByTagNameNS('*', 'Point')].map(e => coords(e.getElementsByTagNameNS('*', 'coordinates')[0])[0]).filter(Boolean);
+    const lines = [...pm.getElementsByTagNameNS('*', 'LineString')].map(e => coords(e.getElementsByTagNameNS('*', 'coordinates')[0])).filter(c => c.length > 1);
+    const polys = [...pm.getElementsByTagNameNS('*', 'Polygon')].map(e => { const o = e.getElementsByTagNameNS('*', 'outerBoundaryIs')[0]; return o ? [coords(o.getElementsByTagNameNS('*', 'coordinates')[0])] : null; }).filter(r => r && r[0].length > 3);
+    let geom = null;
+    if (polys.length) geom = polys.length === 1 ? {type: 'Polygon', coordinates: polys[0]} : {type: 'MultiPolygon', coordinates: polys};
+    else if (lines.length) geom = lines.length === 1 ? {type: 'LineString', coordinates: lines[0]} : {type: 'MultiLineString', coordinates: lines};
+    let pt = pts[0];
+    if (!pt && geom) { try { pt = geom.type.includes('Line') ? turf.along(turf.lineString(lines.sort((a, b) => b.length - a.length)[0]), turf.length(turf.lineString(lines[0])) / 2).geometry.coordinates : turf.pointOnFeature({type: 'Feature', geometry: geom, properties: {}}).geometry.coordinates; } catch (e) { pt = (lines[0] || polys[0][0])[0]; } }
+    if (!pt) continue;
+    const folder = folderPath(pm).slice(1).join(' / ');               // первая папка — сам документ
+    const t = (name + ' ' + folder).toLowerCase();
+    const cat = /(^|\s)(р\.|река|речк|ручей|озеро|оз\.|күөл|үрэх|алаас|alaas)/i.test(t) || (geom && /полиг|lake/i.test(t)) ? (/алаас|alaas|урочищ|местност|сыһыы|аласа?\b/i.test(t) ? 'tract' : 'water')
+      : /урочищ|местност|сыһыы|алаас|алас/i.test(t) ? 'tract' : 'place';
+    feats.push({type: 'Feature', geometry: {type: 'Point', coordinates: [+pt[0].toFixed(6), +pt[1].toFixed(6)]},
+      properties: {name: name || 'Без названия', category: cat, description: (folder ? 'Раздел: ' + folder + (desc ? '\n\n' : '') : '') + desc, photos, link: '', shape: geom}});
+  }
+  return feats;
+}
 async function importMarks(file) {
   try {
-    const j = JSON.parse(await file.text()); let n = 0;
+    let j;
+    if (/\.kmz$/i.test(file.name)) j = {features: kmlToFeatures(await unzipFirstKml(await file.arrayBuffer()))};
+    else { const txt = await file.text(); j = /^\s*</.test(txt) ? {features: kmlToFeatures(txt)} : JSON.parse(txt); }
+    let n = 0;
     for (const f of j.features || []) {
       if (!f.geometry || f.geometry.type !== 'Point') continue;
       const p = f.properties || {}, [lon, lat] = f.geometry.coordinates;
       if (S.marks.some(m => Math.abs(m.lon - lon) < 1e-6 && Math.abs(m.lat - lat) < 1e-6 && m.name === p.name)) continue;   // уже есть
       S.marks.push({id: 'm' + Date.now() + '_' + n, lon: +lon, lat: +lat, name: String(p.name || 'Метка'), cat: MARK_CATS[p.category] ? p.category : 'place',
-        desc: String(p.description || ''), link: String(p.link || ''), photos: Array.isArray(p.photos) ? p.photos.filter(x => /^data:image\//.test(x) || /^https?:|^data\//.test(x)).slice(0, 6) : [], t: Date.now()});
+        desc: String(p.description || ''), link: String(p.link || ''), photos: Array.isArray(p.photos) ? p.photos.filter(x => /^data:image\//.test(x) || /^https?:|^data\//.test(x)).slice(0, 6) : [], shape: p.shape || null, t: Date.now()});
       n++;
     }
     await saveMarks(); renderMarks(); buildIndex(); toast(`Загружено меток: ${n}`); openLeft('saved');
@@ -2505,7 +2560,7 @@ const LEFT = {
       ${m.map(x => `<div class="item" data-ref='${esc(JSON.stringify({kind: 'mark', id: x.id}))}'><span>${esc(x.name)}${x.photos.length ? ' <small>📷' + x.photos.length + '</small>' : ''}</span><small>${esc((MARK_CATS[x.cat] || '').replace(/^\S+\s/, ''))}</small></div>`).join('') || '<div class="muted">Нет меток. Инструменты (линейка) → «Поставить метку», затем клик по карте.</div>'}
       <div style="display:grid;gap:6px;margin-top:8px">
         ${m.length ? '<button class="btn" id="dlMarks">⬇ Скачать мои метки (файл с фото)</button>' : ''}
-        <label class="btn" style="text-align:center">⬆ Загрузить метки из файла<input type="file" id="ulMarks" accept=".geojson,.json,application/geo+json,application/json" style="display:none"></label>
+        <label class="btn" style="text-align:center">⬆ Загрузить метки из файла<input type="file" id="ulMarks" accept=".geojson,.json,.kml,.kmz,application/geo+json,application/json,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" style="display:none"></label>
         ${m.length ? '<button class="btn" id="delMarks">Удалить все мои метки</button>' : ''}
       </div>
       <div class="note">Метки и фото хранятся только в этом браузере. Скачанный файл можно загрузить на другом компьютере — или прислать разработчику, чтобы метки появились на сайте у всех посетителей.</div>
